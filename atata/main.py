@@ -32,6 +32,23 @@ app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="stat
 store = JobStore(DATA_DIR / "jobs")
 
 
+def _asset_tag() -> str:
+    """Метка для обхода кэша браузера.
+
+    Иначе после выката пользователь продолжает видеть старый app.js и
+    ловит поведение, которого в коде уже нет.
+    """
+    static = BASE_DIR / "static"
+    try:
+        newest = max(p.stat().st_mtime_ns for p in static.iterdir() if p.is_file())
+    except (OSError, ValueError):
+        return __version__
+    return f"{__version__}-{newest % 1_000_000_000:09d}"
+
+
+ASSET_TAG = _asset_tag()
+
+
 # --------------------------------------------------------------------------
 # Страницы
 # --------------------------------------------------------------------------
@@ -41,7 +58,12 @@ store = JobStore(DATA_DIR / "jobs")
 async def index(request: Request):
     return templates.TemplateResponse(
         "index.html",
-        {"request": request, "version": __version__, "max_mb": MAX_UPLOAD_MB},
+        {
+            "request": request,
+            "version": __version__,
+            "max_mb": MAX_UPLOAD_MB,
+            "asset_tag": ASSET_TAG,
+        },
     )
 
 

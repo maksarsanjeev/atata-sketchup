@@ -198,14 +198,30 @@ function renderComposition(data) {
 
 const KIND_LABEL = { auto: "автомат", sdk: "нужен SDK", manual: "руками" };
 
+const canFix = (f) => f.fix_kind === "auto" && Boolean(f.fix);
+
 function renderFindings(data) {
   if (!data.findings.length) {
     el.findings.innerHTML = `<p class="hint">ни одной проблемы не нашёл. подозрительно.</p>`;
     return;
   }
 
-  el.findings.innerHTML = data.findings.map((f) => {
-    const auto = f.fix_kind === "auto" && f.fix;
+  // Доступных исправлений обычно сильно меньше, чем находок, и в длинном
+  // списке их не видно. Поэтому сразу говорим, сколько их и где они.
+  const fixable = data.findings.filter(canFix);
+  const bar = fixable.length
+    ? `<div class="pickbar">
+         <span>чинится прямо сейчас: <b>${fixable.length}</b> из ${data.findings.length}
+           — такие карточки обведены зелёным</span>
+         <button class="btn btn-small" id="pick-all">отметить всё доступное</button>
+       </div>`
+    : `<div class="pickbar pickbar-empty">
+         <span>автоматически сейчас не чинится ничего из найденного.
+         Остальное — списком, чтобы править руками.</span>
+       </div>`;
+
+  el.findings.innerHTML = bar + data.findings.map((f) => {
+    const auto = canFix(f);
     const items = f.items.length
       ? `<details class="f-items">
            <summary>показать список (${f.items_total})</summary>
@@ -216,13 +232,15 @@ function renderFindings(data) {
       : "";
 
     return `
-      <article class="finding sev-${esc(f.severity)}">
+      <article class="finding sev-${esc(f.severity)}${auto ? " can-fix" : ""}">
         <div class="f-head">
-          <input class="f-check" type="checkbox" ${auto ? "" : "disabled"}
-                 data-fix="${esc(f.fix || "")}" data-bytes="${f.bytes_impact}"
-                 title="${auto ? "чинится автоматически" : "пока не чинится автоматически"}">
+          <label class="f-pick">
+            <input class="f-check" type="checkbox" ${auto ? "" : "disabled"}
+                   data-fix="${esc(f.fix || "")}" data-bytes="${f.bytes_impact}">
+            <span class="f-pick-label">${auto ? "чинить" : "нельзя"}</span>
+          </label>
           <div class="f-title">
-            <h3>${esc(f.title)}</h3>
+            <h3>${esc(f.title)}${auto ? ' <span class="tag tag-auto">чинится сейчас</span>' : ""}</h3>
             <div class="f-tags">
               <span class="tag tag-${esc(f.severity)}">${esc(f.severity)}</span>
               <span class="tag tag-cat">${esc(f.category)}</span>
@@ -240,6 +258,17 @@ function renderFindings(data) {
   el.findings.querySelectorAll(".f-check").forEach((c) =>
     c.addEventListener("change", updatePicked)
   );
+
+  const pickAll = $("pick-all");
+  if (pickAll) {
+    pickAll.addEventListener("click", () => {
+      el.findings
+        .querySelectorAll(".f-check:not(:disabled)")
+        .forEach((c) => { c.checked = true; });
+      updatePicked();
+      el.whip.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  }
 }
 
 function selectedFixes() {

@@ -182,8 +182,29 @@ main { position: relative; z-index: 1; max-width: 980px; margin: 0 auto; padding
 .finding.sev-high { border-color: var(--high); }
 .finding.sev-medium { border-color: var(--med); }
 .f-head { display: flex; gap: 12px; align-items: flex-start; }
-.f-check { width: 26px; height: 26px; flex: none; accent-color: var(--pink-4); cursor: pointer; margin-top: 3px; }
+.f-check { width: 26px; height: 26px; accent-color: var(--pink-4); cursor: pointer; }
 .f-check:disabled { cursor: not-allowed; }
+
+/* Доступных исправлений мало, и в длинном списке они теряются. Поэтому у
+   галочки есть подпись, а сама карточка обводится зелёным. */
+.f-pick { flex: none; display: flex; flex-direction: column; align-items: center; gap: 4px; width: 58px; }
+.f-pick-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: var(--ink-soft); }
+.f-check:not(:disabled) + .f-pick-label { color: var(--ok); }
+
+.finding.can-fix {
+  border-color: var(--ok);
+  box-shadow: 0 0 0 4px rgba(18, 161, 80, .16);
+  background: linear-gradient(180deg, #f4fff8, #fff);
+}
+
+.pickbar {
+  display: flex; gap: 14px; align-items: center; justify-content: space-between;
+  flex-wrap: wrap;
+  background: #fff; border: 4px solid var(--ok); border-radius: 20px;
+  padding: 12px 16px; margin-bottom: 6px; font-size: 15px;
+}
+.pickbar-empty { border-color: var(--pink-2); border-style: dashed; color: var(--ink-soft); }
+.btn-small { padding: 8px 18px; font-size: 15px; border-width: 3px; }
 .f-title { flex: 1; }
 .f-title h3 { margin: 0 0 6px; font-size: 19px; color: var(--ink); }
 .f-tags { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
