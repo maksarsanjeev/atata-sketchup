@@ -136,6 +136,30 @@ def test_container_estimate_yields_to_real_data(simple_skp: Path, tmp_path: Path
 # ---------------------------------------------------------------- запуск воркера
 
 
+def test_public_api_is_importable():
+    """Всё, что fixes.py тянет из пакета, должно из него импортироваться.
+
+    Ловит класс ошибок, который тесты пропускают: функцию добавили в runner,
+    но забыли в __init__, и падает оно уже в бою на первой же задаче.
+    """
+    import atata.sdk as sdk
+
+    for name in ("can_open", "purge_geometry", "analyze_geometry", "detect"):
+        assert hasattr(sdk, name), f"{name} не экспортирован из atata.sdk"
+        assert name in sdk.__all__
+
+
+def test_fixes_imports_resolve(simple_skp: Path, tmp_path: Path):
+    """Путь применения фикса должен доходить до вызова SDK, а не падать на импорте."""
+    from atata.fixes import apply_fixes
+    from atata.skp.facts import collect_facts
+
+    facts = collect_facts(simple_skp)
+    report = apply_fixes(simple_skp, tmp_path / "out.skp", ["purge_unused"], facts)
+    # Результат зависит от наличия SDK, но ImportError быть не должно.
+    assert not any("ImportError" in e for e in report.errors), report.errors
+
+
 def test_detect_reports_mode():
     from atata.sdk import detect
 

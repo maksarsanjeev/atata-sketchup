@@ -12,9 +12,10 @@ SDK в репозиторий не кладётся — это десятки м
 
 from .capi import SdkError, SdkUnavailable, load_sdk, sdk_status
 from .inspect import ModelFacts, DefinitionInfo, inspect_model
-from .runner import RunnerConfig, analyze_geometry, detect, purge_geometry
+from .runner import RunnerConfig, analyze_geometry, can_open, detect, purge_geometry
 
 __all__ = [
+    "can_open",
     "purge_geometry",
     "SdkError",
     "SdkUnavailable",
