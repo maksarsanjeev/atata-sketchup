@@ -311,19 +311,23 @@ function onFixDone(job, fixJobId) {
       <div class="stat"><b>${bytes(r.size_before)}</b><span>было</span></div>
       <div class="stat"><b>${bytes(r.size_after)}</b><span>стало</span></div>
       <div class="stat"><b>${bytes(r.saved)}</b><span>снято (${savedPct.toFixed(1)}%)</span></div>
-      <div class="stat"><b>${r.touched_total}</b><span>текстур обработано</span></div>
     </div>
     ${purgeBlock(r.purge)}
     <p class="${r.verified ? "verify-ok" : "verify-bad"}">
-      ${r.verified ? "✔" : "✘"} проверка контейнера: ${esc(r.verify_message)}
+      ${r.verified ? "✔" : "✘"} контейнер: ${esc(r.verify_message)}
+    </p>
+    <p class="${r.openable ? "verify-ok" : r.openable === null ? "" : "verify-bad"}">
+      ${r.openable ? "✔" : r.openable === null ? "•" : "✘"} ${esc(r.open_message)}
     </p>
     ${r.errors.length
-      ? `<details class="f-items"><summary>ошибки на отдельных файлах (${r.errors.length})</summary>
+      ? `<details class="f-items"><summary>подробности (${r.errors.length})</summary>
          <ul class="f-list">${r.errors.map((e) => `<li>${esc(e)}</li>`).join("")}</ul></details>`
       : ""}
-    <a class="btn dl" href="/api/job/${fixJobId}/download">скачать наказанный файл ⬇</a>
+    ${r.usable
+      ? `<a class="btn dl" href="/api/job/${fixJobId}/download">скачать наказанный файл ⬇</a>`
+      : `<p class="warn">Скачивание заблокировано: результат не прошёл проверку.</p>`}
     <p class="warn">
-      Проверьте результат в SketchUp перед тем, как пускать файл в работу.
+      Всё равно откройте файл в SketchUp, прежде чем пускать в работу.
       Оригинал не изменялся.
     </p>`;
   show(el.result);

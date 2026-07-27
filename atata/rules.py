@@ -355,9 +355,13 @@ def r_texture_oversized(f: SkpFacts) -> Finding | None:
         items=items,
         count=len(big),
         bytes_impact=saveable,
-        fix="downscale_textures",
-        fix_kind="auto",
+        fix_kind="sdk",
         fix_label=f"Ужать до {MAX_TEXTURE_DIM}px",
+        fix_note=(
+            "Автозамена временно снята: подменять картинки прямо в контейнере "
+            "нельзя — SketchUp перестаёт открывать такой файл. Переделывается "
+            "через SDK."
+        ),
     )
 
 
@@ -476,10 +480,11 @@ def r_texture_npot(f: SkpFacts) -> Finding | None:
             for t in sorted(npot, key=lambda t: -t.bytes)
         ],
         count=len(npot),
-        fix="normalize_pot",
-        fix_kind="auto",
-        fix_label="Привести к степени двойки",
-        fix_note="Меняет пропорции текстуры — проверьте бесшовные паттерны.",
+        fix_kind="sdk",
+        fix_note=(
+            "Автозамена временно снята вместе с остальными правками текстур — "
+            "см. выше."
+        ),
     )
 
 

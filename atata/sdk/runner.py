@@ -154,6 +154,25 @@ def analyze_geometry(
     return from_payload(payload["model"], str(skp_path)), None
 
 
+def can_open(
+    skp_path: str | Path,
+    timeout: int = DEFAULT_TIMEOUT,
+) -> tuple[bool | None, str | None]:
+    """Проверить, что файл открывается настоящим читателем SketchUp.
+
+    Возвращает (открывается, причина). ``None`` первым элементом означает,
+    что проверить нечем — SDK не настроен.
+    """
+    config = detect()
+    if not config.enabled:
+        return None, config.reason
+
+    payload, error = _run_worker(["check", str(skp_path)], config, timeout)
+    if error:
+        return False, error
+    return bool(payload.get("openable")), None
+
+
 def purge_geometry(
     src: str | Path,
     dest: str | Path,

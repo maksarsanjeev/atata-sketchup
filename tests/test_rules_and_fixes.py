@@ -28,10 +28,11 @@ def test_oversized_textures_detected(messy_skp: Path):
     found = findings_by_id(messy_skp)
     oversized = found["textures.oversized"]
     assert oversized.severity == "high"
-    assert oversized.fix == "downscale_textures"
-    assert oversized.fix_kind == "auto"
     assert oversized.bytes_impact > 0
     assert any("concrete.jpg" in item for item in oversized.items)
+    # Автозамена снята: подменять картинки в контейнере нельзя.
+    assert oversized.fix is None
+    assert oversized.fix_kind == "sdk"
 
 
 def test_exact_duplicate_textures_detected(messy_skp: Path):
@@ -76,65 +77,89 @@ def test_rules_never_raise_on_empty_model(tmp_path: Path):
 # ---------------------------------------------------------------- фиксы
 
 
-def test_downscale_shrinks_file_and_keeps_container_valid(messy_skp: Path, tmp_path: Path):
-    dest = tmp_path / "fixed.skp"
-    facts = collect_facts(messy_skp)
-    report = apply_fixes(messy_skp, dest, ["downscale_textures"], facts)
+def test_no_container_level_fixes_are_offered():
+    """Правки внутри контейнера сняты — они ломали файл.
 
-    assert report.verified, report.verify_message
-    assert report.saved > 0
-    assert not report.errors
-    assert report.size_after < report.size_before
+    Пересборка ZIP делает файл нечитаемым для SketchUp, даже если не менять
+    ни байта содержимого: смещения записей уезжают. Проверено на рабочем
+    файле — контейнер целый, все CRC совпадают, SketchUp не открывает.
+    Единственный рабочий путь — пересохранение через SDK.
+    """
+    from atata.fixes import AVAILABLE_FIXES
 
-
-def test_downscale_respects_dimension_limit(messy_skp: Path, tmp_path: Path):
-    dest = tmp_path / "fixed.skp"
-    facts = collect_facts(messy_skp)
-    apply_fixes(messy_skp, dest, ["downscale_textures"], facts)
-
-    after = collect_facts(dest)
-    for texture in after.textures:
-        assert max(texture.width, texture.height) <= MAX_TEXTURE_DIM, texture.entry
-
-
-def test_downscale_leaves_small_textures_alone(messy_skp: Path, tmp_path: Path):
-    dest = tmp_path / "fixed.skp"
-    facts = collect_facts(messy_skp)
-    report = apply_fixes(messy_skp, dest, ["downscale_textures"], facts)
-
-    assert "materials/Wood/wood.jpg" not in report.touched
-
-    with SkpContainer(messy_skp) as before, SkpContainer(dest) as after:
-        assert before.read("materials/Wood/wood.jpg") == after.read("materials/Wood/wood.jpg")
-
-
-def test_fix_never_touches_geometry(messy_skp: Path, tmp_path: Path):
-    dest = tmp_path / "fixed.skp"
-    facts = collect_facts(messy_skp)
-    apply_fixes(messy_skp, dest, ["downscale_textures"], facts)
-
-    with SkpContainer(messy_skp) as before, SkpContainer(dest) as after:
-        assert before.read("model.dat") == after.read("model.dat")
-        assert before.read("meta/meta.dat") == after.read("meta/meta.dat")
-        assert before.prefix == after.prefix
-
-
-def test_pot_normalisation(messy_skp: Path, tmp_path: Path):
-    dest = tmp_path / "pot.skp"
-    facts = collect_facts(messy_skp)
-    apply_fixes(messy_skp, dest, ["downscale_textures", "normalize_pot"], facts)
-
-    after = collect_facts(dest)
-    for texture in after.textures:
-        assert texture.width & (texture.width - 1) == 0, texture.entry
-        assert texture.height & (texture.height - 1) == 0, texture.entry
+    assert "downscale_textures" not in AVAILABLE_FIXES
+    assert "normalize_pot" not in AVAILABLE_FIXES
+    assert all(spec.kind == "sdk" for spec in AVAILABLE_FIXES.values())
 
 
 def test_unknown_fix_is_rejected(simple_skp: Path, tmp_path: Path):
     facts = collect_facts(simple_skp)
     report = apply_fixes(simple_skp, tmp_path / "x.skp", ["make_it_pretty"], facts)
     assert report.errors
-    assert not report.touched
+    assert not report.usable
+
+
+def test_removed_fixes_are_rejected_too(simple_skp: Path, tmp_path: Path):
+    facts = collect_facts(simple_skp)
+    report = apply_fixes(simple_skp, tmp_path / "x.skp", ["downscale_textures"], facts)
+    assert report.errors
+    assert not report.usable
+
+
+def test_report_is_not_usable_without_verification(tmp_path: Path):
+    from atata.fixes import FixReport
+
+    report = FixReport(dest=tmp_path / "x.skp", applied=["purge_unused"])
+    assert not report.usable
+
+    report.verified = True
+    report.openable = False
+    assert not report.usable, "не открывается в SketchUp — отдавать нельзя"
+
+    report.openable = True
+    assert report.usable
+
+    # SDK может быть недоступен: тогда проверить нечем, но контейнер цел.
+    report.openable = None
+    assert report.usable
+
+
+def test_rebuild_recompresses_and_shifts_offsets(tmp_path: Path):
+    """Фиксирует причину, по которой контейнерные правки сняты.
+
+    Пересборка сохраняет имена, размеры и CRC, но пережимает сжатые записи
+    своим уровнем. Размер сжатых данных меняется, смещения всех последующих
+    записей уезжают — и SketchUp такой файл уже не открывает (проверено на
+    рабочем файле 348 МБ: контейнер целый, читатель SDK отказывает).
+    """
+    import zipfile
+
+    from .conftest import build_meta, build_prefix
+
+    src = tmp_path / "packed.skp"
+    payload = (b"GEOMETRY-BLOCK-" * 4096)
+
+    with open(src, "wb") as fh:
+        fh.write(build_prefix())
+        with zipfile.ZipFile(fh, "w") as z:
+            z.writestr("meta/meta.dat", build_meta("24.0.484", "Millimeter", "x.skp"))
+            info = zipfile.ZipInfo("model.dat")
+            info.compress_type = zipfile.ZIP_DEFLATED
+            # SketchUp жмёт своим уровнем; воспроизводим это, взяв не тот,
+            # который zipfile использует по умолчанию.
+            z.writestr(info, payload, compresslevel=1)
+
+    with SkpContainer(src) as container:
+        before = {e.name: e.compressed_size for e in container.entries}
+        container.rebuild(tmp_path / "rebuilt.skp")
+
+    with SkpContainer(tmp_path / "rebuilt.skp") as rebuilt:
+        after = {e.name: e.compressed_size for e in rebuilt.entries}
+
+    assert before["model.dat"] != after["model.dat"], (
+        "если размер сжатых данных совпал, механизм поломки изменился — "
+        "стоит перепроверить, нельзя ли вернуть контейнерные правки"
+    )
 
 
 # ---------------------------------------------------------------- хеши

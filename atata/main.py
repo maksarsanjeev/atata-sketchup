@@ -229,6 +229,14 @@ async def download(job_id: str):
     job = store.get(job_id)
     if job is None or job.status != "done" or job.kind != "fix":
         raise HTTPException(404, "готового файла нет")
+    # Файл, не прошедший проверку открываемости, отдавать нельзя: снаружи
+    # он выглядит целым архивом, а SketchUp его не примет.
+    if job.result and not job.result.get("usable", True):
+        raise HTTPException(
+            409,
+            "результат не прошёл проверку — файл не открывается в SketchUp, "
+            "скачивание заблокировано",
+        )
     candidates = list(job.dir.glob("*.skp"))
     if not candidates:
         raise HTTPException(404, "файл не найден на диске")

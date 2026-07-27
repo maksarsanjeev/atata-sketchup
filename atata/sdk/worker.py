@@ -69,6 +69,8 @@ def main(argv: list[str] | None = None) -> int:
         return _purge(argv[1:])
     if command == "inspect":
         return _inspect(argv[1:])
+    if command == "check":
+        return _check(argv[1:])
     _emit({"ok": False, "error": f"неизвестная команда: {command}"}, None)
     return 2
 
@@ -100,6 +102,45 @@ def _purge(argv: list[str]) -> int:
         return 5
 
     _emit({"ok": True, "purge": report.as_dict()}, out_path)
+    return 0
+
+
+def _check(argv: list[str]) -> int:
+    """Открывается ли файл настоящим читателем SketchUp.
+
+    Единственная честная проверка результата. Целый ZIP-контейнер ничего
+    не гарантирует: файл может пройти проверку архива и всё равно не
+    открыться в SketchUp.
+    """
+    if not argv:
+        _emit({"ok": False, "error": "не передан путь к .skp"}, None)
+        return 2
+
+    from ctypes import byref
+
+    from .capi import SUModelRef, call, load_sdk
+    from .inspect import _ensure_initialized
+
+    out_path = to_native_path(argv[1]) if len(argv) > 1 else None
+    target = to_native_path(argv[0])
+
+    try:
+        lib = load_sdk()
+        _ensure_initialized(lib)
+        model = SUModelRef()
+        call(lib, "SUModelCreateFromFile", byref(model), target.encode("utf-8"))
+        try:
+            call(lib, "SUModelRelease", byref(model))
+        except SdkError:
+            pass
+    except SdkUnavailable as exc:
+        _emit({"ok": False, "error": str(exc), "kind": "unavailable"}, out_path)
+        return 3
+    except SdkError as exc:
+        _emit({"ok": False, "error": str(exc), "kind": "sdk"}, out_path)
+        return 4
+
+    _emit({"ok": True, "openable": True}, out_path)
     return 0
 
 
