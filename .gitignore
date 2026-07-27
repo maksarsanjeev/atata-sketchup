@@ -1,0 +1,25 @@
+# Файлы моделей: тяжёлые и почти всегда чужие/клиентские.
+# В публичный репозиторий им дороги нет.
+*.skp
+*.skb
+*.layout
+
+data/
+uploads/
+
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+.env
+.env.*
+!.env.example
+
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

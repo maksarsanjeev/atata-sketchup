@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ата-та sketchup ✿ порка кривых моделей</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="sparkles" aria-hidden="true"></div>
+
+<header class="head">
+  <img class="logo" src="/static/logo.svg" alt="ата-та sketchup">
+  <div class="head-text">
+    <h1>ата·та <span>sketchup</span></h1>
+    <p class="tagline">
+      ✧･ﾟ твой .skp вёл себя плохо ･ﾟ✧<br>
+      загрузи — покажу список провинностей — сам выберешь, за что пороть
+    </p>
+    <p class="badges">
+      <span class="badge">v{{ version }}</span>
+      <span class="badge">до {{ max_mb }} МБ</span>
+      <span class="badge">SketchUp 2021+</span>
+    </p>
+  </div>
+</header>
+
+<main>
+  <!-- ЗАГРУЗКА -->
+  <section id="drop" class="card dropzone">
+    <div class="drop-inner">
+      <div class="kitty">₍ᐢ•ﻌ•ᐢ₎</div>
+      <p class="drop-title">кинь сюда файл .skp</p>
+      <p class="drop-sub">или ткни, если лень тащить</p>
+      <input type="file" id="file" accept=".skp" hidden>
+      <button class="btn btn-big" id="pick">выбрать файл ♡</button>
+      <p class="drop-note">файл никуда не уходит — всё считается на этом сервере</p>
+    </div>
+  </section>
+
+  <!-- ПРОГРЕСС -->
+  <section id="progress" class="card hidden">
+    <h2 class="sect-title">⏳ ковыряюсь в файле</h2>
+    <p class="stage" id="stage">жду</p>
+    <div class="bar"><div class="bar-fill" id="bar"></div></div>
+    <p class="hint" id="elapsed"></p>
+  </section>
+
+  <!-- ОШИБКА -->
+  <section id="error" class="card card-error hidden">
+    <h2 class="sect-title">(╥﹏╥) не вышло</h2>
+    <p id="error-text"></p>
+    <button class="btn" onclick="location.reload()">заново</button>
+  </section>
+
+  <!-- ОТЧЁТ -->
+  <section id="report" class="hidden">
+    <div class="card summary" id="summary"></div>
+
+    <div class="card">
+      <h2 class="sect-title">◕‿◕ из чего состоит файл</h2>
+      <div id="composition" class="composition"></div>
+    </div>
+
+    <div class="card">
+      <h2 class="sect-title">(╬ Ò﹏Ó) список провинностей</h2>
+      <p class="hint">
+        отметь галочками, что чинить. <b>автомат</b> — сделаю прямо сейчас,
+        <b>нужен SDK</b> — это второй этап, пока только показываю.
+      </p>
+      <div id="findings"></div>
+    </div>
+
+    <div class="card action" id="action">
+      <div class="action-row">
+        <div>
+          <p class="action-title">выбрано исправлений: <b id="picked">0</b></p>
+          <p class="hint" id="saving">освободится примерно: —</p>
+        </div>
+        <button class="btn btn-huge" id="whip" disabled>ВЫПОРОТЬ! ⚡</button>
+      </div>
+      <p class="warn">
+        ⚠️ оригинал остаётся нетронутым, на выходе — новый файл. Контейнер после
+        пересборки проверяется на целостность, но в самом SketchUp round-trip пока
+        не проверялся: держите оригинал под рукой.
+      </p>
+    </div>
+  </section>
+
+  <!-- РЕЗУЛЬТАТ ПОРКИ -->
+  <section id="result" class="card hidden">
+    <h2 class="sect-title">✧ выпорото ✧</h2>
+    <div id="result-body"></div>
+  </section>
+</main>
+
+<footer>
+  <p>
+    ата·та sketchup — <a href="https://github.com/maksarsanjeev/atata-sketchup">github</a>
+    · сделано в хоумлабе · куб на логотипе обобщённый, торговый знак SketchUp не используется
+  </p>
+  <p class="tiny">♡ ⁠₊˚ pink and painful ˚₊ ♡</p>
+</footer>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

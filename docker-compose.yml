@@ -1,0 +1,26 @@
+services:
+  atata:
+    build: .
+    image: atata-sketchup:latest
+    container_name: atata-sketchup
+    restart: unless-stopped
+    ports:
+      - "8080:8000"
+    volumes:
+      - atata-data:/data
+    environment:
+      ATATA_DATA_DIR: /data
+      ATATA_MAX_UPLOAD_MB: "1024"
+      ATATA_MAX_WORKERS: "2"
+      ATATA_JOB_TTL_HOURS: "6"
+    # Стенд — 4 vCPU / 8 ГБ. Замер на файле 348 МБ: пик 552 МБ на анализе и
+    # 902 МБ на анализе с пересборкой. Лимит в 4 ГБ даёт запас на файлы
+    # 600 МБ и на две параллельные задачи (ATATA_MAX_WORKERS=2).
+    mem_limit: 4g
+    memswap_limit: 4g
+    cpus: 3.5
+    tmpfs:
+      - /tmp:size=1g
+
+volumes:
+  atata-data:
