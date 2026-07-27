@@ -1,8 +1,9 @@
 """Отдельный процесс разбора геометрии через SketchUp SDK.
 
-Запускается как подпроцесс и отдаёт результат JSON-ом в stdout::
+Запускается как подпроцесс и отдаёт результат JSON-ом::
 
-    python -m atata.sdk.worker model.skp
+    python -m atata.sdk.worker model.skp result.json   # в файл (основной режим)
+    python -m atata.sdk.worker model.skp               # в stdout, для отладки
 
 Вынесен в отдельный процесс по трём причинам:
 
@@ -39,36 +40,43 @@ def to_native_path(path: str) -> str:
     return path
 
 
+def _emit(payload: dict, out_path: str | None) -> None:
+    """Отдать результат.
+
+    Через stdout JSON приходит покорёженным: и PowerShell при
+    перенаправлении, и консоль Wine норовят переломать длинную строку и
+    переколбасить кодировку. Поэтому основной режим — запись в файл,
+    а stdout остаётся для отладки руками.
+    """
+    text = json.dumps(payload, ensure_ascii=False)
+    if out_path:
+        Path(out_path).write_text(text, encoding="utf-8")
+    else:
+        sys.stdout.write(text)
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     if not argv:
-        json.dump({"ok": False, "error": "не передан путь к .skp"}, sys.stdout)
+        _emit({"ok": False, "error": "не передан путь к .skp"}, None)
         return 2
 
     raw = argv[0]
+    out_path = to_native_path(argv[1]) if len(argv) > 1 else None
     target = to_native_path(raw)
 
     try:
         facts = inspect_model(target)
     except SdkUnavailable as exc:
-        json.dump(
-            {"ok": False, "error": str(exc), "kind": "unavailable"},
-            sys.stdout,
-            ensure_ascii=False,
-        )
+        _emit({"ok": False, "error": str(exc), "kind": "unavailable"}, out_path)
         return 3
     except SdkError as exc:
-        json.dump(
-            {"ok": False, "error": str(exc), "kind": "sdk"},
-            sys.stdout,
-            ensure_ascii=False,
-        )
+        _emit({"ok": False, "error": str(exc), "kind": "sdk"}, out_path)
         return 4
     except Exception as exc:  # noqa: BLE001 — наружу должен уйти JSON, не трейс
-        json.dump(
+        _emit(
             {"ok": False, "error": f"{type(exc).__name__}: {exc}", "kind": "other"},
-            sys.stdout,
-            ensure_ascii=False,
+            out_path,
         )
         return 5
 
@@ -87,15 +95,14 @@ def main(argv: list[str] | None = None) -> int:
     payload["materials_list"] = facts.materials
     payload["layers_list"] = facts.layers
 
-    json.dump(
+    _emit(
         {
             "ok": True,
             "path": str(Path(raw)),
             "sdk": {"library": status.library, "api_version": status.version},
             "model": payload,
         },
-        sys.stdout,
-        ensure_ascii=False,
+        out_path,
     )
     return 0
 
