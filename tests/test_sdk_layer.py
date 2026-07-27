@@ -203,6 +203,37 @@ def test_detect_reports_mode():
         assert config.command
 
 
+def test_every_serialized_field_is_read_back():
+    """Поле, попавшее в JSON, должно читаться обратно.
+
+    Ловит перекос, который тесты иначе пропускают: поле добавили в as_dict,
+    а в from_payload забыли — правило молча перестаёт срабатывать.
+    """
+    from atata.sdk.runner import from_payload
+
+    source = fake_model(
+        loose_edges=3457,
+        loose_edges_total=500_000,
+        loose_edges_actionable=450_429,
+        linework_containers=12,
+        scenes=6,
+        styles=5,
+        max_depth=11,
+        truncated=True,
+    )
+    payload = source.as_dict()
+    payload["materials_list"] = source.materials
+    payload["layers_list"] = source.layers
+    payload["definitions_detail"] = []
+
+    restored = from_payload(payload, "x.skp")
+    skip = {"definitions", "materials", "layers", "heaviest", "unused_definitions"}
+    for key, value in source.as_dict().items():
+        if key in skip:
+            continue
+        assert getattr(restored, key, None) == value, f"поле {key} потерялось"
+
+
 def test_payload_roundtrip():
     """JSON воркера должен разворачиваться обратно без потерь."""
     from atata.sdk.runner import from_payload
