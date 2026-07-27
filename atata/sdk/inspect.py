@@ -22,6 +22,7 @@ from .capi import (
     SULayerRef,
     SUMaterialRef,
     SUModelRef,
+    SUStylesRef,
     SdkError,
     call,
     get_array,
@@ -165,7 +166,7 @@ def inspect_model(
         facts.layers = _named(lib, model, "SUModelGetNumLayers",
                               "SUModelGetLayers", SULayerRef, "SULayerGetName")
         facts.scenes = _safe_count(lib, "SUModelGetNumScenes", model)
-        facts.styles = _safe_count(lib, "SUModelGetNumStyles", model)
+        facts.styles = _style_count(lib, model)
 
         facts.max_depth = state["max_depth"]
         facts.truncated = state["truncated"]
@@ -288,6 +289,16 @@ def _named(lib, model, count_getter, list_getter, item_type, name_getter) -> lis
         except SdkError:
             names.append("<без имени>")
     return names
+
+
+def _style_count(lib, model) -> int:
+    """У модели нет SUModelGetNumStyles: сперва коллекция, потом счётчик."""
+    try:
+        styles = SUStylesRef()
+        call(lib, "SUModelGetStyles", model, byref(styles))
+        return get_count(lib, "SUStylesGetNumStyles", styles)
+    except SdkError:
+        return 0
 
 
 def _safe_count(lib, getter: str, ref, *extra) -> int:

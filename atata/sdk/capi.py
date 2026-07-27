@@ -76,6 +76,12 @@ SUGroupRef = _ref_type("SUGroupRef")
 SUMaterialRef = _ref_type("SUMaterialRef")
 SULayerRef = _ref_type("SULayerRef")
 SUStringRef = _ref_type("SUStringRef")
+SUStylesRef = _ref_type("SUStylesRef")
+
+# Эти три функции объявлены в заголовках как void, а не SU_RESULT.
+# Проверять у них код возврата нельзя: в регистре будет мусор, и любая
+# инициализация падала бы с выдуманной ошибкой.
+VOID_FUNCTIONS = {"SUInitialize", "SUTerminate", "SUGetAPIVersion"}
 
 
 @dataclass
@@ -225,7 +231,9 @@ _SIGNATURES: list[tuple[str, list]] = [
     ("SUModelGetNumLayers", [SUModelRef, POINTER(c_size_t)]),
     ("SUModelGetLayers", [SUModelRef, c_size_t, POINTER(SULayerRef), POINTER(c_size_t)]),
     ("SUModelGetNumScenes", [SUModelRef, POINTER(c_size_t)]),
-    ("SUModelGetNumStyles", [SUModelRef, POINTER(c_size_t)]),
+    # Числа стилей у модели нет: сначала берётся коллекция, потом счётчик.
+    ("SUModelGetStyles", [SUModelRef, POINTER(SUStylesRef)]),
+    ("SUStylesGetNumStyles", [SUStylesRef, POINTER(c_size_t)]),
     # сущности
     ("SUEntitiesGetNumFaces", [SUEntitiesRef, POINTER(c_size_t)]),
     ("SUEntitiesGetNumEdges", [SUEntitiesRef, c_bool, POINTER(c_size_t)]),
@@ -259,7 +267,7 @@ def _declare(lib: ctypes.CDLL) -> None:
             # Функции нет в этой версии SDK — обнаружим при вызове.
             continue
         fn.argtypes = argtypes
-        fn.restype = ctypes.c_int
+        fn.restype = None if name in VOID_FUNCTIONS else ctypes.c_int
 
 
 def check(result: int, where: str) -> None:
@@ -274,6 +282,9 @@ def call(lib: ctypes.CDLL, name: str, *args) -> None:
         fn = getattr(lib, name)
     except AttributeError as exc:
         raise SdkError(f"{name}: нет в загруженной версии SDK") from exc
+    if name in VOID_FUNCTIONS:
+        fn(*args)
+        return
     check(fn(*args), name)
 
 
