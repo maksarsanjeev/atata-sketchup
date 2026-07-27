@@ -45,8 +45,8 @@ def test_analysis_works_without_sdk(simple_skp: Path):
 def fake_model(**kwargs) -> ModelFacts:
     defaults = dict(
         path="fake.skp",
-        root_faces=1000,
-        root_edges=3000,
+        direct_faces=200,
+        direct_edges=600,
         total_faces=1000,
         total_edges=3000,
     )
@@ -131,3 +131,20 @@ def test_container_estimate_yields_to_real_data(simple_skp: Path, tmp_path: Path
     facts.model = fake_model()
     with_sdk = {f.id for f in analyze(facts)}
     assert "model.weight" not in with_sdk
+
+
+# ---------------------------------------------------------------- имена
+
+
+def test_mojibake_repaired():
+    """Кириллица, прочитанная как cp1251 и сохранённая обратно в UTF-8."""
+    from atata.sdk.inspect import fix_mojibake
+
+    assert fix_mojibake("РљРѕРјРїРѕРЅРµРЅС‚#3") == "Компонент#3"
+
+
+def test_mojibake_leaves_normal_names_alone():
+    from atata.sdk.inspect import fix_mojibake
+
+    for name in ("Компонент#79", "HunterDouglas_Esfera Cordao", "skp478C", ""):
+        assert fix_mojibake(name) == name

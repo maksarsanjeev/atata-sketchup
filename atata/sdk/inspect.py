@@ -52,8 +52,11 @@ class DefinitionInfo:
 @dataclass
 class ModelFacts:
     path: str
-    root_faces: int = 0
-    root_edges: int = 0
+    # Прямо в корне модели, без захода в группы и компоненты.
+    direct_faces: int = 0
+    direct_edges: int = 0
+    # Вся сцена с раскрытием: определение, вставленное сорок раз, считается
+    # сорок раз — именно столько геометрии видит вьюпорт.
     total_faces: int = 0
     total_edges: int = 0
     loose_edges: int = 0
@@ -74,8 +77,8 @@ class ModelFacts:
 
     def as_dict(self) -> dict:
         return {
-            "root_faces": self.root_faces,
-            "root_edges": self.root_edges,
+            "direct_faces": self.direct_faces,
+            "direct_edges": self.direct_edges,
             "total_faces": self.total_faces,
             "total_edges": self.total_edges,
             "loose_edges": self.loose_edges,
@@ -97,6 +100,25 @@ class ModelFacts:
                 for d in self.heaviest()
             ],
         }
+
+
+def fix_mojibake(name: str) -> str:
+    """Починить кириллицу, дважды прошедшую через кодировки.
+
+    В старых и много раз импортированных файлах встречаются имена вида
+    ``РљРѕРјРїРѕРЅРµРЅС‚#3`` — это UTF-8, когда-то прочитанный как cp1251
+    и сохранённый обратно. Обратное преобразование однозначно, поэтому
+    чиним, но только если оно удалось и на выходе получилась кириллица.
+    """
+    if not name or not any(c in name for c in "РСЂРёТ"):
+        return name
+    try:
+        repaired = name.encode("cp1251").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return name
+    if any("А" <= c <= "я" for c in repaired):
+        return repaired
+    return name
 
 
 _initialized = False
@@ -146,17 +168,18 @@ def inspect_model(
         memo: dict[int, tuple[int, int]] = {}
         state = {"truncated": False, "max_depth": 0}
 
-        facts.root_faces, facts.root_edges = _walk(lib, root, memo, set(), 1, state)
+        facts.direct_faces = get_count(lib, "SUEntitiesGetNumFaces", root)
+        facts.direct_edges = get_count(lib, "SUEntitiesGetNumEdges", root, False)
         facts.loose_edges = get_count(lib, "SUEntitiesGetNumEdges", root, True)
+
+        # Обход от корня уже раскрывает группы и компоненты, поэтому его
+        # результат и есть полная геометрия сцены.
+        facts.total_faces, facts.total_edges = _walk(lib, root, memo, set(), 1, state)
 
         if progress:
             progress("считаю компоненты", 0.5)
 
         facts.definitions = _definitions(lib, model, memo, state)
-
-        # Суммарная геометрия сцены: корень плюс вклад каждого определения.
-        facts.total_faces = facts.root_faces
-        facts.total_edges = facts.root_edges
 
         if progress:
             progress("собираю материалы и слои", 0.8)
@@ -250,7 +273,7 @@ def _definitions(lib, model, memo, state) -> list[DefinitionInfo]:
     out: list[DefinitionInfo] = []
     for ref in refs:
         try:
-            name = read_string(lib, "SUComponentDefinitionGetName", ref)
+            name = fix_mojibake(read_string(lib, "SUComponentDefinitionGetName", ref))
         except SdkError:
             name = "<без имени>"
 

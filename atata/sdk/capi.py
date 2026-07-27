@@ -164,9 +164,8 @@ def load_sdk() -> ctypes.CDLL:
         _status = SdkStatus(
             available=False,
             reason=(
-                "библиотека SDK не найдена. Скачайте SketchUp SDK с "
-                "developer.sketchup.com (приняв Trimble Developer Terms), "
-                "распакуйте и укажите путь в ATATA_SDK_PATH."
+                "библиотека SDK не найдена. Распакуйте SketchUp SDK и укажите "
+                "путь в ATATA_SDK_PATH — см. README."
             ),
         )
         raise SdkUnavailable(_status.reason)

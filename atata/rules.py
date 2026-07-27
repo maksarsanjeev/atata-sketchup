@@ -543,6 +543,55 @@ def r_texture_png_without_alpha(f: SkpFacts) -> Finding | None:
     )
 
 
+_EXPECTED_EXT = {
+    "JPEG": {".jpg", ".jpeg"},
+    "PNG": {".png"},
+    "TIFF": {".tif", ".tiff"},
+    "BMP": {".bmp"},
+    "GIF": {".gif"},
+    "WEBP": {".webp"},
+    "TGA": {".tga"},
+    "PSD": {".psd"},
+}
+
+
+@rule
+def r_texture_wrong_extension(f: SkpFacts) -> Finding | None:
+    hits = []
+    for t in f.textures:
+        if not t.fmt:
+            continue
+        ext = "." + t.filename.rsplit(".", 1)[-1].lower() if "." in t.filename else ""
+        allowed = _EXPECTED_EXT.get(t.fmt)
+        if allowed and ext not in allowed:
+            hits.append((t, ext))
+    if not hits:
+        return None
+
+    hits.sort(key=lambda pair: -pair[0].bytes)
+    return Finding(
+        id="textures.wrong_extension",
+        severity="medium",
+        category="текстуры",
+        title=f"{len(hits)} текстур с неверным расширением",
+        summary=(
+            "Внутри файла лежит не тот формат, который заявлен в имени. "
+            "SketchUp разбирает такую текстуру по расширению, спотыкается и "
+            "переключается на угадывание — в логах это видно как ошибки "
+            "декодера.\n\n"
+            "Само по себе не смертельно, но часть плагинов и экспортёров на "
+            "таких файлах отваливается молча."
+        ),
+        items=[
+            f"{t.material}/{t.filename} — внутри {t.fmt}, а расширение {ext or 'отсутствует'}"
+            for t, ext in hits
+        ],
+        count=len(hits),
+        fix_kind="sdk",
+        fix_note="Переименование рвёт ссылку из model.dat — правится только через SDK.",
+    )
+
+
 @rule
 def r_texture_unreadable(f: SkpFacts) -> Finding | None:
     bad = [t for t in f.textures if t.unreadable]

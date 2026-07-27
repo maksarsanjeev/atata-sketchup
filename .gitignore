@@ -7,6 +7,10 @@
 data/
 uploads/
 
+# SketchUp SDK: чужие бинарники, десятки мегабайт. Ставится локально,
+# путь задаётся через ATATA_SDK_PATH.
+sdk/
+
 __pycache__/
 *.py[cod]
 .venv/
