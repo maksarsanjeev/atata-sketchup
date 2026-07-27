@@ -133,6 +133,69 @@ def test_container_estimate_yields_to_real_data(simple_skp: Path, tmp_path: Path
     assert "model.weight" not in with_sdk
 
 
+# ---------------------------------------------------------------- запуск воркера
+
+
+def test_detect_reports_mode():
+    from atata.sdk import detect
+
+    config = detect()
+    assert config.mode in ("native", "wine", "disabled")
+    if config.mode == "disabled":
+        assert config.reason, "отказ обязан объяснять причину"
+    else:
+        assert config.command
+
+
+def test_payload_roundtrip():
+    """JSON воркера должен разворачиваться обратно без потерь."""
+    from atata.sdk.runner import from_payload
+
+    source = fake_model(
+        total_faces=4_545_548,
+        total_edges=9_728_801,
+        max_depth=11,
+        loose_edges=3457,
+        definitions=[
+            DefinitionInfo("Фикус", 30_000, 0, 30_000, instances=8, used_instances=8),
+            DefinitionInfo("Мусор", 500, 0, 500, instances=0, used_instances=0),
+        ],
+        materials=["a", "b"],
+        layers=["Layer0"],
+        scenes=6,
+    )
+
+    payload = source.as_dict()
+    payload["definitions_detail"] = [
+        {
+            "name": d.name,
+            "own_faces": d.own_faces,
+            "expanded_faces": d.expanded_faces,
+            "instances": d.instances,
+            "used_instances": d.used_instances,
+        }
+        for d in source.definitions
+    ]
+    payload["materials_list"] = source.materials
+    payload["layers_list"] = source.layers
+
+    restored = from_payload(payload, "x.skp")
+    assert restored.total_faces == source.total_faces
+    assert restored.total_edges == source.total_edges
+    assert restored.max_depth == 11
+    assert restored.loose_edges == 3457
+    assert len(restored.definitions) == 2
+    assert len(restored.unused_definitions) == 1
+    assert restored.heaviest(1)[0].total_faces == 240_000
+    assert restored.materials == ["a", "b"]
+
+
+def test_worker_reports_missing_argument(tmp_path: Path):
+    from atata.sdk.worker import main
+
+    assert main([]) == 2
+
+
 # ---------------------------------------------------------------- имена
 
 

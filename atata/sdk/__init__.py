@@ -12,6 +12,7 @@ SDK в репозиторий не кладётся — это десятки м
 
 from .capi import SdkError, SdkUnavailable, load_sdk, sdk_status
 from .inspect import ModelFacts, DefinitionInfo, inspect_model
+from .runner import RunnerConfig, analyze_geometry, detect
 
 __all__ = [
     "SdkError",
@@ -21,4 +22,7 @@ __all__ = [
     "ModelFacts",
     "DefinitionInfo",
     "inspect_model",
+    "RunnerConfig",
+    "analyze_geometry",
+    "detect",
 ]
