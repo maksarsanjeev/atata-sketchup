@@ -110,10 +110,40 @@ def r_unused_definitions(f: SkpFacts) -> Finding | None:
             for d in sorted(unused, key=lambda d: -d.own_faces)
         ],
         count=len(unused),
+        bytes_impact=_purge_estimate(f),
         fix="purge_unused",
-        fix_kind="sdk",
+        # Правило вообще срабатывает только когда SDK доступен — значит
+        # и починить есть чем.
+        fix_kind="auto",
         fix_label="Вычистить неиспользуемое",
+        fix_note=(
+            "Оценка экономии — сверху: она считает, что байты распределены "
+            "поровну между гранями. На практике выходит примерно вдвое меньше. "
+            "Модель пересохраняется родным сериализатором SketchUp; оригинал "
+            "не изменяется, но результат стоит открыть и проверить."
+        ),
     )
+
+
+def _purge_estimate(f: SkpFacts) -> int:
+    """Прикинуть, сколько байт освободит purge.
+
+    Каждое определение хранится в файле один раз, сколько бы вставок у него
+    ни было. Значит доля мусора в хранимой геометрии — это доля граней
+    неиспользуемых определений от всех хранимых.
+
+    Оценка грубая: считаем, что байты в ``model.dat`` распределены
+    пропорционально граням, и берём его сжатый размер — именно столько он
+    весит в итоговом файле. Реальный результат меряется на применении.
+    """
+    model = f.model
+    if model is None or not f.model_dat_compressed:
+        return 0
+    stored = sum(d.own_faces for d in model.definitions) + model.direct_faces
+    if stored <= 0:
+        return 0
+    junk = sum(d.own_faces for d in model.unused_definitions)
+    return int(f.model_dat_compressed * junk / stored)
 
 
 @rule

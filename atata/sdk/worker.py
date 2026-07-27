@@ -2,8 +2,11 @@
 
 Запускается как подпроцесс и отдаёт результат JSON-ом::
 
-    python -m atata.sdk.worker model.skp result.json   # в файл (основной режим)
-    python -m atata.sdk.worker model.skp               # в stdout, для отладки
+    python -m atata.sdk.worker inspect model.skp result.json
+    python -m atata.sdk.worker purge   model.skp clean.skp result.json
+
+Без имени файла результат уходит в stdout — годится для отладки руками,
+но не для разбора вызывающей стороной (см. :func:`_emit`).
 
 Вынесен в отдельный процесс по трём причинам:
 
@@ -57,6 +60,50 @@ def _emit(payload: dict, out_path: str | None) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
+    if not argv:
+        _emit({"ok": False, "error": "не передана команда"}, None)
+        return 2
+
+    command = argv[0]
+    if command == "purge":
+        return _purge(argv[1:])
+    if command == "inspect":
+        return _inspect(argv[1:])
+    _emit({"ok": False, "error": f"неизвестная команда: {command}"}, None)
+    return 2
+
+
+def _purge(argv: list[str]) -> int:
+    if len(argv) < 2:
+        _emit({"ok": False, "error": "нужны пути: исходный .skp и выходной .skp"}, None)
+        return 2
+
+    from .repair import purge_model
+
+    src = to_native_path(argv[0])
+    dest = to_native_path(argv[1])
+    out_path = to_native_path(argv[2]) if len(argv) > 2 else None
+
+    try:
+        report = purge_model(src, dest)
+    except SdkUnavailable as exc:
+        _emit({"ok": False, "error": str(exc), "kind": "unavailable"}, out_path)
+        return 3
+    except SdkError as exc:
+        _emit({"ok": False, "error": str(exc), "kind": "sdk"}, out_path)
+        return 4
+    except Exception as exc:  # noqa: BLE001
+        _emit(
+            {"ok": False, "error": f"{type(exc).__name__}: {exc}", "kind": "other"},
+            out_path,
+        )
+        return 5
+
+    _emit({"ok": True, "purge": report.as_dict()}, out_path)
+    return 0
+
+
+def _inspect(argv: list[str]) -> int:
     if not argv:
         _emit({"ok": False, "error": "не передан путь к .skp"}, None)
         return 2

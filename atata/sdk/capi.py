@@ -25,6 +25,12 @@ from pathlib import Path
 
 SU_ERROR_NONE = 0
 
+# enum SUComponentType
+SU_COMPONENT_NORMAL = 0
+SU_COMPONENT_GROUP = 1
+SU_COMPONENT_IMAGE = 2
+COMPONENT_TYPE_NAMES = {0: "обычный компонент", 1: "группа", 2: "изображение"}
+
 # Расшифровки кодов возврата, которые реально встречаются при чтении файла.
 SU_RESULTS = {
     0: "SU_ERROR_NONE",
@@ -77,6 +83,9 @@ SUMaterialRef = _ref_type("SUMaterialRef")
 SULayerRef = _ref_type("SULayerRef")
 SUStringRef = _ref_type("SUStringRef")
 SUStylesRef = _ref_type("SUStylesRef")
+SUSceneRef = _ref_type("SUSceneRef")
+SUEntityRef = _ref_type("SUEntityRef")
+SUDrawingElementRef = _ref_type("SUDrawingElementRef")
 
 # Эти три функции объявлены в заголовках как void, а не SU_RESULT.
 # Проверять у них код возврата нельзя: в регистре будет мусор, и любая
@@ -233,6 +242,26 @@ _SIGNATURES: list[tuple[str, list]] = [
     # Числа стилей у модели нет: сначала берётся коллекция, потом счётчик.
     ("SUModelGetStyles", [SUModelRef, POINTER(SUStylesRef)]),
     ("SUStylesGetNumStyles", [SUStylesRef, POINTER(c_size_t)]),
+    # запись и чистка
+    ("SUModelSaveToFile", [SUModelRef, c_char_p]),
+    (
+        "SUModelRemoveComponentDefinitions",
+        [SUModelRef, c_size_t, POINTER(SUComponentDefinitionRef)],
+    ),
+    ("SUModelPurgeUnusedLayers", [SUModelRef, POINTER(c_size_t)]),
+    ("SUModelPurgeEmptyLayerFolders", [SUModelRef, POINTER(c_size_t)]),
+    # Сцены держат свой список скрытых объектов. После удаления определений
+    # эти ссылки повисают, и сохранение падает с SU_ERROR_SERIALIZATION.
+    ("SUModelGetScenes", [SUModelRef, c_size_t, POINTER(SUSceneRef), POINTER(c_size_t)]),
+    ("SUSceneGetNumHiddenEntities", [SUSceneRef, POINTER(c_size_t)]),
+    (
+        "SUSceneGetHiddenEntities",
+        [SUSceneRef, c_size_t, POINTER(SUEntityRef), POINTER(c_size_t)],
+    ),
+    (
+        "SUSceneSetDrawingElementHidden",
+        [SUSceneRef, SUDrawingElementRef, c_bool],
+    ),
     # сущности
     ("SUEntitiesGetNumFaces", [SUEntitiesRef, POINTER(c_size_t)]),
     ("SUEntitiesGetNumEdges", [SUEntitiesRef, c_bool, POINTER(c_size_t)]),
@@ -247,6 +276,10 @@ _SIGNATURES: list[tuple[str, list]] = [
     ("SUComponentDefinitionGetName", [SUComponentDefinitionRef, POINTER(SUStringRef)]),
     ("SUComponentDefinitionGetNumInstances", [SUComponentDefinitionRef, POINTER(c_size_t)]),
     ("SUComponentDefinitionGetNumUsedInstances", [SUComponentDefinitionRef, POINTER(c_size_t)]),
+    # Группы и изображения в модели — тоже «определения компонентов», но
+    # заводит и удаляет их сам SketchUp. Их надо уметь отличать.
+    ("SUComponentDefinitionGetType", [SUComponentDefinitionRef, POINTER(ctypes.c_int)]),
+    ("SUComponentDefinitionIsInternal", [SUComponentDefinitionRef, POINTER(c_bool)]),
     # материалы и слои
     ("SUMaterialGetName", [SUMaterialRef, POINTER(SUStringRef)]),
     ("SULayerGetName", [SULayerRef, POINTER(SUStringRef)]),

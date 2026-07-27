@@ -196,6 +196,40 @@ def test_worker_reports_missing_argument(tmp_path: Path):
     assert main([]) == 2
 
 
+def test_worker_rejects_unknown_command():
+    from atata.sdk.worker import main
+
+    assert main(["polish"]) == 2
+
+
+def test_purge_report_shape():
+    """Отчёт о чистке должен доезжать до фронта целиком."""
+    from atata.sdk.repair import PurgeReport
+
+    report = PurgeReport(
+        definitions_before=3820,
+        definitions_after=1573,
+        removed_definitions=2247,
+        passes=10,
+        size_before=365_581_605,
+        size_after=255_800_000,
+        scenes=6,
+        cleared_scene_hidden=653,
+    )
+    data = report.as_dict()
+    assert data["saved"] == report.size_before - report.size_after
+    for key in (
+        "removed_definitions",
+        "definitions_before",
+        "definitions_after",
+        "passes",
+        "scenes",
+        "cleared_scene_hidden",
+        "errors",
+    ):
+        assert key in data
+
+
 # ---------------------------------------------------------------- имена
 
 

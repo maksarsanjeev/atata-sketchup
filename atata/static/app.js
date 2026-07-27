@@ -288,6 +288,19 @@ el.whip.addEventListener("click", async () => {
   poll(data.job_id, (job) => onFixDone(job, data.job_id));
 });
 
+function purgeBlock(p) {
+  if (!p) return "";
+  return `
+    <div class="res-grid">
+      <div class="stat"><b>${p.removed_definitions}</b><span>определений выброшено</span></div>
+      <div class="stat"><b>${p.definitions_before} → ${p.definitions_after}</b><span>стало определений</span></div>
+      <div class="stat"><b>${p.removed_layers}</b><span>пустых тегов убрано</span></div>
+      <div class="stat"><b>${p.passes}</b><span>проходов чистки</span></div>
+    </div>
+    ${p.errors && p.errors.length
+      ? `<p class="warn">при чистке: ${p.errors.map(esc).join("; ")}</p>` : ""}`;
+}
+
 function onFixDone(job, fixJobId) {
   hide(el.progress);
   const r = job.result;
@@ -300,6 +313,7 @@ function onFixDone(job, fixJobId) {
       <div class="stat"><b>${bytes(r.saved)}</b><span>снято (${savedPct.toFixed(1)}%)</span></div>
       <div class="stat"><b>${r.touched_total}</b><span>текстур обработано</span></div>
     </div>
+    ${purgeBlock(r.purge)}
     <p class="${r.verified ? "verify-ok" : "verify-bad"}">
       ${r.verified ? "✔" : "✘"} проверка контейнера: ${esc(r.verify_message)}
     </p>

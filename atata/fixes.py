@@ -22,7 +22,7 @@ from PIL import Image
 
 from .rules import MAX_TEXTURE_DIM
 from .skp.container import Entry, SkpContainer, verify
-from .skp.facts import SkpFacts
+from .skp.facts import SkpFacts, collect_facts
 
 JPEG_QUALITY = 88
 
@@ -32,7 +32,7 @@ class FixSpec:
     id: str
     label: str
     description: str
-    kind: str = "auto"
+    kind: str = "auto"  # auto — контейнерный слой, sdk — через SketchUp SDK
 
 
 AVAILABLE_FIXES: dict[str, FixSpec] = {
@@ -52,7 +52,23 @@ AVAILABLE_FIXES: dict[str, FixSpec] = {
             "пропорции — на бесшовных паттернах проверьте результат."
         ),
     ),
+    "purge_unused": FixSpec(
+        id="purge_unused",
+        label="Вычистить неиспользуемое",
+        description=(
+            "Удаляет определения компонентов, не вставленные в модель, и пустые "
+            "теги. То же, что штатный Purge Unused. Модель пересохраняется "
+            "родным сериализатором SketchUp."
+        ),
+        kind="sdk",
+    ),
 }
+
+# Фиксы уровня контейнера правят картинки внутри ZIP; SDK-фиксы
+# перезаписывают модель целиком. Порядок в конвейере важен: сперва чистка
+# модели, потом текстуры — иначе часть текстур ушла бы вместе с мусором,
+# а работу по их ужиманию мы бы уже проделали.
+SDK_FIXES = {"purge_unused"}
 
 
 @dataclass
@@ -65,6 +81,7 @@ class FixReport:
     verified: bool = False
     verify_message: str = ""
     errors: list[str] = field(default_factory=list)
+    purge: dict | None = None
 
     @property
     def saved(self) -> int:
@@ -82,6 +99,7 @@ class FixReport:
             "verify_message": self.verify_message,
             "errors": self.errors[:20],
             "filename": self.dest.name,
+            "purge": self.purge,
         }
 
 
@@ -95,13 +113,43 @@ def apply_fixes(
     src, dest = Path(src), Path(dest)
     fix_ids = [fid for fid in fix_ids if fid in AVAILABLE_FIXES]
     report = FixReport(dest=dest, applied=fix_ids)
+    report.size_before = src.stat().st_size
 
     if not fix_ids:
         report.errors.append("не выбрано ни одного применимого исправления")
         return report
 
-    targets = _plan(facts, fix_ids)
+    sdk_ids = [fid for fid in fix_ids if fid in SDK_FIXES]
+    container_ids = [fid for fid in fix_ids if fid not in SDK_FIXES]
+
+    working = src
+    scratch: Path | None = None
+
+    if sdk_ids:
+        from .sdk import purge_geometry
+
+        scratch = dest.with_name(dest.stem + "__purged.skp")
+        purge_report, error = purge_geometry(src, scratch, progress=progress)
+        if error:
+            report.errors.append(f"чистка модели не выполнена: {error}")
+            scratch = None
+        else:
+            report.purge = purge_report
+            working = scratch
+            # Пересохранённый файл — уже другой контейнер: имена и состав
+            # записей могли измениться, поэтому факты пересобираем.
+            if container_ids:
+                if progress:
+                    progress("пересобираю факты после чистки", 0.0)
+                facts = collect_facts(working)
+
+    if not container_ids:
+        return _finish_sdk_only(report, working, dest, scratch, progress)
+
+    targets = _plan(facts, container_ids)
     if not targets:
+        if working != src:
+            return _finish_sdk_only(report, working, dest, scratch, progress)
         report.errors.append("под выбранные исправления не попала ни одна текстура")
         return report
 
@@ -128,8 +176,8 @@ def apply_fixes(
         if progress and total:
             progress("пересобираю контейнер", 0.9 * done / total)
 
-    with SkpContainer(src) as container:
-        result = container.rebuild(
+    with SkpContainer(working) as container:
+        container.rebuild(
             dest,
             # В память читаем только текстуры, которые реально меняем.
             # Всё прочее — включая гигабайтный model.dat — идёт потоком.
@@ -137,9 +185,38 @@ def apply_fixes(
             transform=transform,
             progress=on_progress,
         )
-    report.size_before = result.size_before
-    report.size_after = result.size_after
+    report.size_after = dest.stat().st_size
 
+    if scratch is not None and scratch.exists():
+        scratch.unlink()
+
+    if progress:
+        progress("проверяю целостность контейнера", 0.92)
+    report.verified, report.verify_message = verify(dest)
+    if progress:
+        progress("готово", 1.0)
+    return report
+
+
+def _finish_sdk_only(
+    report: FixReport,
+    working: Path,
+    dest: Path,
+    scratch: Path | None,
+    progress: Callable[[str, float], None] | None,
+) -> FixReport:
+    """Завершить, когда контейнерных правок не было — только чистка модели."""
+    if working == dest:
+        pass
+    elif working.exists():
+        if dest.exists():
+            dest.unlink()
+        working.rename(dest)
+    else:
+        report.errors.append("после чистки не осталось файла для выдачи")
+        return report
+
+    report.size_after = dest.stat().st_size
     if progress:
         progress("проверяю целостность контейнера", 0.92)
     report.verified, report.verify_message = verify(dest)

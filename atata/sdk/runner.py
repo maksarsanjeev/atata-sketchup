@@ -83,35 +83,23 @@ def detect() -> RunnerConfig:
     return RunnerConfig(mode="wine", command=[wine, win_python])
 
 
-def analyze_geometry(
-    skp_path: str | Path,
-    timeout: int = DEFAULT_TIMEOUT,
-    progress: Callable[[str, float], None] | None = None,
-) -> tuple[ModelFacts | None, str | None]:
-    """Разобрать геометрию. Возвращает (факты, причина отказа)."""
-    config = detect()
-    if not config.enabled:
-        return None, config.reason
-
-    if progress:
-        progress(f"разбираю геометрию через SDK ({config.mode})", 0.0)
-
+def _run_worker(
+    args: list[str],
+    config: RunnerConfig,
+    timeout: int,
+) -> tuple[dict | None, str | None]:
+    """Запустить воркер и вернуть (payload, причина отказа)."""
     with tempfile.TemporaryDirectory(prefix="atata-sdk-") as tmp:
         out = Path(tmp) / "result.json"
-        cmd = config.command + [
-            "-m",
-            "atata.sdk.worker",
-            str(skp_path),
-            str(out),
-        ]
+        cmd = config.command + ["-m", "atata.sdk.worker", *args, str(out)]
 
         env = dict(os.environ)
-        # Питон под Wine ищет пакет рядом с собой; для нативного запуска
-        # достаточно текущего sys.path.
         env.setdefault("PYTHONIOENCODING", "utf-8")
         if config.mode == "wine":
             env.setdefault("WINEDEBUG", "-all")
-            env.setdefault("WINEPREFIX", os.environ.get("ATATA_WINE_PREFIX", "/tmp/.wine-atata"))
+            env.setdefault(
+                "WINEPREFIX", os.environ.get("ATATA_WINE_PREFIX", "/tmp/.wine-atata")
+            )
 
         try:
             proc = subprocess.run(
@@ -119,10 +107,14 @@ def analyze_geometry(
                 env=env,
                 capture_output=True,
                 timeout=timeout,
-                cwd=str(Path(config.command[-1]).parent) if config.mode == "wine" else None,
+                # Питон под Wine ищет пакеты рядом с собой; нативному
+                # запуску хватает текущего sys.path.
+                cwd=str(Path(config.command[-1]).parent)
+                if config.mode == "wine"
+                else None,
             )
         except subprocess.TimeoutExpired:
-            return None, f"разбор геометрии не уложился в {timeout} с"
+            return None, f"воркер не уложился в {timeout} с"
         except OSError as exc:
             return None, f"не удалось запустить воркер: {exc}"
 
@@ -137,10 +129,51 @@ def analyze_geometry(
 
     if not payload.get("ok"):
         return None, payload.get("error", "воркер вернул ошибку без описания")
+    return payload, None
+
+
+def analyze_geometry(
+    skp_path: str | Path,
+    timeout: int = DEFAULT_TIMEOUT,
+    progress: Callable[[str, float], None] | None = None,
+) -> tuple[ModelFacts | None, str | None]:
+    """Разобрать геометрию. Возвращает (факты, причина отказа)."""
+    config = detect()
+    if not config.enabled:
+        return None, config.reason
+
+    if progress:
+        progress(f"разбираю геометрию через SDK ({config.mode})", 0.0)
+
+    payload, error = _run_worker(["inspect", str(skp_path)], config, timeout)
+    if error:
+        return None, error
 
     if progress:
         progress("геометрия разобрана", 1.0)
     return from_payload(payload["model"], str(skp_path)), None
+
+
+def purge_geometry(
+    src: str | Path,
+    dest: str | Path,
+    timeout: int = DEFAULT_TIMEOUT,
+    progress: Callable[[str, float], None] | None = None,
+) -> tuple[dict | None, str | None]:
+    """Вычистить неиспользуемое и пересохранить модель средствами SDK."""
+    config = detect()
+    if not config.enabled:
+        return None, config.reason
+
+    if progress:
+        progress("чищу модель через SDK", 0.0)
+
+    payload, error = _run_worker(
+        ["purge", str(src), str(dest)], config, timeout
+    )
+    if error:
+        return None, error
+    return payload.get("purge"), None
 
 
 def from_payload(data: dict, path: str) -> ModelFacts:
