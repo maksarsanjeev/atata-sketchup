@@ -120,9 +120,13 @@ def apply_fixes(
         report.touched.append(entry.name)
         return new_data
 
+    # Проверка целостности распаковывает весь архив, включая гигабайтный
+    # model.dat, и занимает заметную часть времени. Поэтому пересборке
+    # отдаём 0..0.9 шкалы, остальное — проверке, иначе прогресс висит
+    # на сотне и выглядит как зависание.
     def on_progress(done: int, total: int) -> None:
         if progress and total:
-            progress("пересобираю контейнер", done / total)
+            progress("пересобираю контейнер", 0.9 * done / total)
 
     with SkpContainer(src) as container:
         result = container.rebuild(
@@ -137,8 +141,10 @@ def apply_fixes(
     report.size_after = result.size_after
 
     if progress:
-        progress("проверяю целостность", 1.0)
+        progress("проверяю целостность контейнера", 0.92)
     report.verified, report.verify_message = verify(dest)
+    if progress:
+        progress("готово", 1.0)
     return report
 
 
