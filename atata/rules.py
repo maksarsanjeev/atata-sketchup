@@ -601,6 +601,133 @@ def r_texture_wrong_extension(f: SkpFacts) -> Finding | None:
 
 
 @rule
+def r_texture_bad_names(f: SkpFacts) -> Finding | None:
+    from .names import check as check_name
+
+    broken: list[str] = []
+    risky: list[str] = []
+    for t in f.textures:
+        for issue in check_name(t.filename):
+            line = f"{t.material}/{t.filename} — {issue.message}"
+            if issue.suggestion:
+                line += f" ({issue.suggestion})"
+            (broken if issue.kind == "broken" else risky).append(line)
+
+    if not broken and not risky:
+        return None
+
+    parts = []
+    if broken:
+        parts.append(
+            f"**Сломано — {len(broken)}.** Такое имя не совпадает с тем, что "
+            f"реально лежит на диске: Windows срезает пробел или точку в конце, "
+            f"невидимые символы не видно глазом, а перекодированное имя "
+            f"не находится вообще."
+        )
+    if risky:
+        parts.append(
+            f"**Рискованно — {len(risky)}.** Само по себе законно: современные "
+            f"SketchUp и V-Ray с кириллицей и иероглифами работают. Но старые "
+            f"экспортёры и часть плагинов на таком спотыкаются."
+        )
+
+    return Finding(
+        id="textures.bad_names",
+        severity="high" if broken else "low",
+        category="текстуры",
+        title=(
+            f"{len(broken)} сломанных имён файлов"
+            if broken
+            else f"{len(risky)} имён с риском"
+        ),
+        summary="\n\n".join(parts),
+        items=broken + risky,
+        count=len(broken) + len(risky),
+        fix_kind="sdk",
+        fix_note="Переименование рвёт ссылку из model.dat — правится только через SDK.",
+    )
+
+
+# Пути, которые заведомо не переживают переезд на другую машину.
+_HOPELESS_HINTS = ("\\users\\", "/users/", "documents and settings", "\\temp\\", "/temp/")
+
+
+@rule
+def r_dead_asset_links(f: SkpFacts) -> Finding | None:
+    """Ссылки на файлы, которые не найдутся на чужой машине.
+
+    Разделение здесь принципиальное. Путь на сетевой ресурс может быть
+    совершенно рабочим — просто сейчас нет доступа к серверу. А путь вида
+    ``C:\\Users\\кто-то\\Desktop`` не найдётся нигде и никогда, даже у автора.
+    Валить их в одну кучу — значит подтолкнуть к «починке» того, что работает.
+    """
+    links = f.asset_links
+    if not links:
+        return None
+
+    embedded = {t.material: {x.filename.lower() for x in f.textures if x.material == t.material}
+                for t in f.textures}
+
+    network: list[str] = []
+    hopeless_fixable: list[str] = []
+    hopeless_lost: list[str] = []
+    bare: list[str] = []
+
+    for link in links:
+        low = link.path.lower()
+        if link.kind == "unc":
+            network.append(f"{link.material} → {link.path}")
+        elif link.kind == "bare":
+            bare.append(f"{link.material} → {link.path}")
+        elif any(hint in low for hint in _HOPELESS_HINTS) or link.kind == "local":
+            has = link.filename.lower() in embedded.get(link.material, set())
+            where = "есть встроенная копия" if has else "встроенной копии НЕТ"
+            entry = f"{link.material} → {link.path}  [{where}]"
+            (hopeless_fixable if has else hopeless_lost).append(entry)
+
+    hopeless = len(hopeless_fixable) + len(hopeless_lost)
+    if not hopeless and not network:
+        return None
+
+    summary = [
+        f"Рендер-плагины хранят полные пути к текстурам. Всего таких ссылок "
+        f"{len(links)}."
+    ]
+    if hopeless:
+        summary.append(
+            f"**{hopeless} ведут на конкретный компьютер** — чужой рабочий стол, "
+            f"загрузки, временную папку. Они не найдутся ни у вас, ни у автора "
+            f"модели: у {len(hopeless_fixable)} из них нужная текстура уже лежит "
+            f"внутри файла, у {len(hopeless_lost)} — нет."
+        )
+    if network:
+        summary.append(
+            f"**{len(network)} ведут на сетевой ресурс.** Это, скорее всего, "
+            f"нормально: из офиса подхватятся, из дома — нет. Их трогать не надо."
+        )
+    if bare:
+        summary.append(
+            f"Ещё {len(bare)} записаны просто именем файла — такие плагин ищет "
+            f"по своим путям поиска."
+        )
+
+    return Finding(
+        id="assets.dead_links",
+        severity="high" if hopeless_lost else "medium" if hopeless else "info",
+        category="гигиена",
+        title=f"{hopeless} ссылок на файлы с чужого компьютера",
+        summary="\n\n".join(summary),
+        items=hopeless_lost + hopeless_fixable + network + bare,
+        count=hopeless,
+        fix_kind="sdk",
+        fix_note=(
+            "Перенаправление путей делается через SDK. Сперва надо проверить "
+            "на живом рендере, какой вариант плагин принимает."
+        ),
+    )
+
+
+@rule
 def r_texture_unreadable(f: SkpFacts) -> Finding | None:
     bad = [t for t in f.textures if t.unreadable]
     if not bad:

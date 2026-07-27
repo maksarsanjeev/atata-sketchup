@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -29,6 +30,18 @@ TEXTURE_EXT = (
 
 _MATERIAL_TAG = re.compile(rb"<mat:material\s([^>]*)>", re.DOTALL)
 _ATTR = re.compile(rb'(\w+)="([^"]*)"')
+
+# Данные плагинов рендера лежат в словарях атрибутов материала: значение —
+# либо JSON в CDATA (V-Ray), либо XML с тегом Filepath (Enscape и прочие).
+_ATTR_VALUE = re.compile(
+    rb'<n0:Attribute key="([^"]+)"[^>]*>\s*(?:<!\[CDATA\[(.*?)\]\]>|([^<]*))\s*</n0:Attribute>',
+    re.DOTALL,
+)
+_FILEPATH_TAG = re.compile(r"<Filepath>([^<]+)</Filepath>")
+_ASSET_EXT = (
+    ".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".tga",
+    ".psd", ".exr", ".hdr", ".ies", ".vrmesh",
+)
 
 
 @dataclass
@@ -54,6 +67,35 @@ class TextureInfo:
         if not self.width or not self.height:
             return 0.0
         return self.width * self.height / 1_000_000
+
+
+@dataclass
+class AssetLink:
+    """Ссылка на внешний файл, зашитая в данные плагина рендера."""
+
+    material: str
+    plugin: str  # класс плагина, например BitmapBuffer
+    param: str
+    path: str
+
+    @property
+    def filename(self) -> str:
+        return re.split(r"[\\/]", self.path)[-1].strip()
+
+    @property
+    def kind(self) -> str:
+        """Откуда путь: сетевой ресурс, конкретная машина или просто имя."""
+        p = self.path.replace("/", "\\")
+        if p.startswith("\\\\"):
+            return "unc"
+        if re.match(r"^[A-Za-z]:\\", p):
+            return "local"
+        return "bare"
+
+    @property
+    def is_temp(self) -> bool:
+        low = self.path.lower()
+        return "\\temp\\" in low or "/temp/" in low or "appdata\\local\\temp" in low
 
 
 @dataclass
@@ -86,6 +128,7 @@ class SkpFacts:
     thumbnail_count: int
     style_count: int
     scene_count: int
+    asset_links: list[AssetLink] = field(default_factory=list)
     # Заполняется, только если доступен SketchUp SDK: разбор model.dat.
     # Тип — atata.sdk.inspect.ModelFacts; здесь не импортируется, чтобы
     # контейнерный слой не зависел от SDK-слоя.
@@ -138,7 +181,7 @@ def collect_facts(
 
         # -- материалы ------------------------------------------------------
         report("разбираю материалы", 0.15)
-        materials = _collect_materials(skp, entries)
+        materials, asset_links = _collect_materials(skp, entries)
 
         # -- текстуры -------------------------------------------------------
         texture_entries = [e for e in entries if _is_texture(e.name)]
@@ -168,6 +211,7 @@ def collect_facts(
             thumbnail_count=group_counts.get("thumbnails", 0),
             style_count=group_counts.get("styles", 0),
             scene_count=group_counts.get("scene_thumbnails", 0),
+            asset_links=asset_links,
         )
 
 
@@ -180,8 +224,40 @@ def _is_texture(name: str) -> bool:
     return leaf.endswith(TEXTURE_EXT)
 
 
-def _collect_materials(skp: SkpContainer, entries: list[Entry]) -> list[MaterialInfo]:
+def _asset_links(raw: bytes, material: str) -> list[AssetLink]:
+    """Вытащить ссылки на внешние файлы из данных плагинов рендера."""
+    links: list[AssetLink] = []
+    for match in _ATTR_VALUE.finditer(raw):
+        value = (match.group(2) or match.group(3) or b"").decode("utf-8", "replace")
+        if not value:
+            continue
+
+        for path in _FILEPATH_TAG.findall(value):
+            links.append(AssetLink(material, "Enscape", "Filepath", path.strip()))
+
+        if '"file"' not in value:
+            continue
+        try:
+            data = json.loads(value)
+        except (ValueError, TypeError):
+            continue
+        params = data.get("params")
+        if not isinstance(params, dict):
+            continue
+        plugin = str(data.get("class", "?"))
+        for key, item in params.items():
+            if not isinstance(item, str):
+                continue
+            if item.lower().endswith(_ASSET_EXT):
+                links.append(AssetLink(material, plugin, key, item.strip()))
+    return links
+
+
+def _collect_materials(
+    skp: SkpContainer, entries: list[Entry]
+) -> tuple[list[MaterialInfo], list[AssetLink]]:
     by_name: dict[str, MaterialInfo] = {}
+    links: list[AssetLink] = []
 
     for e in entries:
         if not e.name.startswith("materials/"):
@@ -208,6 +284,9 @@ def _collect_materials(skp: SkpContainer, entries: list[Entry]) -> list[Material
             raw = skp.read(info.xml_entry)
         except Exception:
             continue
+
+        links.extend(_asset_links(raw, info.name))
+
         match = _MATERIAL_TAG.search(raw)
         if not match:
             continue
@@ -231,7 +310,7 @@ def _collect_materials(skp: SkpContainer, entries: list[Entry]) -> list[Material
         except (KeyError, ValueError):
             pass
 
-    return sorted(by_name.values(), key=lambda m: m.name)
+    return sorted(by_name.values(), key=lambda m: m.name), links
 
 
 def _probe_texture(skp: SkpContainer, entry: Entry) -> TextureInfo:
