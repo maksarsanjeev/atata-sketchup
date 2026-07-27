@@ -328,6 +328,22 @@ def test_repair_report_shape():
         assert key in data
 
 
+def test_scene_hidden_flags_are_accounted_for():
+    """Каждая снятая пометка «скрыто» должна быть либо возвращена, либо объяснена."""
+    from atata.sdk.repair import RepairReport
+
+    report = RepairReport(
+        cleared_scene_hidden=653,
+        restored_scene_hidden=629,
+        lost_scene_hidden=24,
+    )
+    data = report.as_dict()
+    assert (
+        data["restored_scene_hidden"] + data["lost_scene_hidden"]
+        == data["cleared_scene_hidden"]
+    ), "пометки не должны пропадать бесследно"
+
+
 def test_operation_order_is_fixed():
     """Порядок операций осмыслен: чинить -> мусор -> текстуры -> purge."""
     from atata.sdk.repair import OPERATION_ORDER

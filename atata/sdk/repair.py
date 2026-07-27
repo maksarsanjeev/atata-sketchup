@@ -30,6 +30,7 @@ from .capi import (
     SUModelRef,
     SUSceneRef,
     SUTextureRef,
+    SU_ERROR_PARTIAL_SUCCESS,
     SdkError,
     call,
     get_array,
@@ -82,6 +83,8 @@ class RepairReport:
     # сцены
     scenes: int = 0
     cleared_scene_hidden: int = 0
+    restored_scene_hidden: int = 0
+    lost_scene_hidden: int = 0
     # файл
     size_before: int = 0
     size_after: int = 0
@@ -108,6 +111,8 @@ class RepairReport:
             "passes": self.passes,
             "scenes": self.scenes,
             "cleared_scene_hidden": self.cleared_scene_hidden,
+            "restored_scene_hidden": self.restored_scene_hidden,
+            "lost_scene_hidden": self.lost_scene_hidden,
             "size_before": self.size_before,
             "size_after": self.size_after,
             "saved": self.saved,
@@ -182,8 +187,13 @@ def _attempt(
         )
         report.scenes = _safe_count(lib, "SUModelGetNumScenes", model)
 
+        # Списки скрытых объектов у сцен ломаются от правок, поэтому их
+        # снимаем заранее — но сперва запоминаем, что там было, чтобы потом
+        # вернуть всё, что переживёт операции.
+        snapshot: list[tuple[int, int]] = []
         if clear_hidden:
-            report.cleared_scene_hidden = _clear_scene_hidden(lib, model, report)
+            snapshot = _snapshot_scene_hidden(lib, model)
+            report.cleared_scene_hidden = _clear_scene_hidden(lib, model)
 
         for index, op in enumerate(operations):
             base = 0.1 + 0.6 * index / max(len(operations), 1)
@@ -208,6 +218,11 @@ def _attempt(
         report.definitions_after = _safe_count(
             lib, "SUModelGetNumComponentDefinitions", model
         )
+
+        if snapshot:
+            if progress:
+                progress("возвращаю сценам пометки «скрыто»", 0.85)
+            _restore_scene_hidden(lib, model, snapshot, report)
 
         if progress:
             progress("сохраняю модель", 0.9 if clear_hidden else 0.4)
@@ -517,7 +532,36 @@ def _removable(lib, model) -> list:
     ]
 
 
-def _clear_scene_hidden(lib, model, report: RepairReport) -> int:
+def _scene_hidden(lib, scene) -> list:
+    count = _safe_count(lib, "SUSceneGetNumHiddenEntities", scene)
+    if not count:
+        return []
+    return get_array(lib, "SUSceneGetHiddenEntities", scene, count, SUEntityRef)
+
+
+def _snapshot_scene_hidden(lib, model) -> list[tuple[int, int]]:
+    """Запомнить, что в каких сценах спрятано — по устойчивым идентификаторам.
+
+    Указатели переживут правки не все, а идентификаторы переживают: по ним
+    объект потом находится заново через ``SUModelGetEntitiesByPersistentIDs``.
+    """
+    snapshot: list[tuple[int, int]] = []
+    count = _safe_count(lib, "SUModelGetNumScenes", model)
+    for index, scene in enumerate(
+        get_array(lib, "SUModelGetScenes", model, count, SUSceneRef)
+    ):
+        for entity in _scene_hidden(lib, scene):
+            pid = ctypes.c_int64()
+            try:
+                call(lib, "SUEntityGetPersistentID", entity, byref(pid))
+            except SdkError:
+                continue
+            if pid.value:
+                snapshot.append((index, pid.value))
+    return snapshot
+
+
+def _clear_scene_hidden(lib, model) -> int:
     """Снять со сцен пометки «скрыто».
 
     Только ДО изменения модели: после в списке остаются висячие указатели,
@@ -525,17 +569,8 @@ def _clear_scene_hidden(lib, model, report: RepairReport) -> int:
     """
     cleared = 0
     count = _safe_count(lib, "SUModelGetNumScenes", model)
-    if not count:
-        return 0
-
     for scene in get_array(lib, "SUModelGetScenes", model, count, SUSceneRef):
-        hidden_count = _safe_count(lib, "SUSceneGetNumHiddenEntities", scene)
-        if not hidden_count:
-            continue
-        entities = get_array(
-            lib, "SUSceneGetHiddenEntities", scene, hidden_count, SUEntityRef
-        )
-        for entity in entities:
+        for entity in _scene_hidden(lib, scene):
             # Все SU*Ref — это struct { void* ptr }, приведение типа сводится
             # к переносу указателя; штатные From/To объявлены inline и из DLL
             # не экспортируются.
@@ -545,10 +580,70 @@ def _clear_scene_hidden(lib, model, report: RepairReport) -> int:
                 cleared += 1
             except SdkError:
                 pass
-
-    if cleared:
-        report.errors.append(
-            f"в сценах снята пометка «скрыто» с {cleared} объектов — иначе файл "
-            f"не сохранялся. Сами сцены сохранены, но скрытое в них стало видимым."
-        )
     return cleared
+
+
+def _restore_scene_hidden(
+    lib, model, snapshot: list[tuple[int, int]], report: RepairReport
+) -> None:
+    """Вернуть пометки «скрыто» тем объектам, что пережили правки.
+
+    Объекты, которых больше нет, не возвращаются — их пометка всё равно
+    ничего не значила. Именно из-за таких висячих записей сохранение и
+    падало.
+    """
+    count = _safe_count(lib, "SUModelGetNumScenes", model)
+    scenes = get_array(lib, "SUModelGetScenes", model, count, SUSceneRef)
+    if not scenes:
+        report.lost_scene_hidden = len(snapshot)
+        return
+
+    pids = sorted({pid for _, pid in snapshot})
+    array = (ctypes.c_int64 * len(pids))(*pids)
+    found = (SUEntityRef * len(pids))()
+    try:
+        # Часть идентификаторов заведомо не найдётся — их объекты удалены
+        # как неиспользуемые. SDK сообщает об этом PARTIAL_SUCCESS, и это
+        # штатный исход, а не сбой.
+        call(
+            lib,
+            "SUModelGetEntitiesByPersistentIDs",
+            model,
+            len(pids),
+            array,
+            found,
+            allow=(SU_ERROR_PARTIAL_SUCCESS,),
+        )
+    except SdkError as exc:
+        report.lost_scene_hidden = len(snapshot)
+        report.errors.append(f"пометки «скрыто» вернуть не удалось: {exc}")
+        return
+
+    alive = {pid: entity for pid, entity in zip(pids, found) if entity.ptr}
+
+    restored = 0
+    for scene_index, pid in snapshot:
+        entity = alive.get(pid)
+        if entity is None or scene_index >= len(scenes):
+            continue
+        element = SUDrawingElementRef(entity.ptr)
+        try:
+            call(
+                lib,
+                "SUSceneSetDrawingElementHidden",
+                scenes[scene_index],
+                element,
+                True,
+            )
+            restored += 1
+        except SdkError:
+            pass
+
+    report.restored_scene_hidden = restored
+    report.lost_scene_hidden = len(snapshot) - restored
+    if report.lost_scene_hidden:
+        report.errors.append(
+            f"в сценах потеряно {report.lost_scene_hidden} пометок «скрыто» — "
+            f"эти объекты удалены как неиспользуемые, пометка на них уже "
+            f"ни на что не указывала. Остальные {restored} возвращены."
+        )

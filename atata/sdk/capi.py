@@ -267,6 +267,14 @@ _SIGNATURES: list[tuple[str, list]] = [
     ),
     # Штатная починка модели — то же, что «Fix Problems» в самом SketchUp.
     ("SUModelFixErrors", [SUModelRef]),
+    # Устойчивый идентификатор объекта и обратный поиск по нему. Нужны,
+    # чтобы вернуть сценам пометки «скрыто» после правок: указатели к тому
+    # моменту уже недействительны, а идентификаторы переживают всё.
+    ("SUEntityGetPersistentID", [SUEntityRef, POINTER(ctypes.c_int64)]),
+    (
+        "SUModelGetEntitiesByPersistentIDs",
+        [SUModelRef, c_size_t, POINTER(ctypes.c_int64), POINTER(SUEntityRef)],
+    ),
     # Висячие рёбра.
     ("SUEntitiesErase", [SUEntitiesRef, c_size_t, POINTER(SUEntityRef)]),
     (
@@ -351,8 +359,16 @@ def check(result: int, where: str) -> None:
         raise SdkError(f"{where}: {name}")
 
 
-def call(lib: ctypes.CDLL, name: str, *args) -> None:
-    """Вызвать функцию SDK и проверить код возврата."""
+SU_ERROR_PARTIAL_SUCCESS = 16
+
+
+def call(lib: ctypes.CDLL, name: str, *args, allow: tuple[int, ...] = ()) -> None:
+    """Вызвать функцию SDK и проверить код возврата.
+
+    ``allow`` — коды, которые в данном месте не считаются ошибкой. Нужно,
+    например, для поиска по идентификаторам: если часть объектов удалена,
+    SDK честно возвращает SU_ERROR_PARTIAL_SUCCESS, и это ожидаемо.
+    """
     try:
         fn = getattr(lib, name)
     except AttributeError as exc:
@@ -360,7 +376,10 @@ def call(lib: ctypes.CDLL, name: str, *args) -> None:
     if name in VOID_FUNCTIONS:
         fn(*args)
         return
-    check(fn(*args), name)
+    result = fn(*args)
+    if result in allow:
+        return
+    check(result, name)
 
 
 def read_string(lib: ctypes.CDLL, getter: str, ref) -> str:

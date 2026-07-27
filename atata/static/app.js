@@ -337,6 +337,10 @@ function repairBlock(r) {
     cells.push(`<div class="stat"><b>${r.definitions_before} → ${r.definitions_after}</b><span>стало определений</span></div>`);
   }
 
+  if (r.cleared_scene_hidden) {
+    cells.push(`<div class="stat"><b>${r.restored_scene_hidden} / ${r.cleared_scene_hidden}</b><span>пометок «скрыто» возвращено</span></div>`);
+  }
+
   const scaleWarn = r.texture_scale_kept === false
     ? `<p class="warn">⚠️ у части текстур не сошлась привязка к размерам в модели — проверьте масштаб.</p>`
     : "";
