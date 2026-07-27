@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 from pathlib import Path
@@ -40,10 +41,20 @@ def _asset_tag() -> str:
     """
     static = BASE_DIR / "static"
     try:
-        newest = max(p.stat().st_mtime_ns for p in static.iterdir() if p.is_file())
-    except (OSError, ValueError):
+        # Считаем от имени, размера и времени правки каждого файла. Брать
+        # остаток от st_mtime_ns нельзя: при копировании в образ наносекунды
+        # обнуляются, и метка получается одинаковой после любого выката.
+        parts = sorted(
+            f"{p.name}:{p.stat().st_size}:{p.stat().st_mtime_ns}"
+            for p in static.iterdir()
+            if p.is_file()
+        )
+    except OSError:
         return __version__
-    return f"{__version__}-{newest % 1_000_000_000:09d}"
+    if not parts:
+        return __version__
+    digest = hashlib.sha1("|".join(parts).encode("utf-8")).hexdigest()[:10]
+    return f"{__version__}-{digest}"
 
 
 ASSET_TAG = _asset_tag()
