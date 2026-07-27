@@ -171,22 +171,64 @@ def r_nesting_depth(f: SkpFacts) -> Finding | None:
 @rule
 def r_loose_geometry(f: SkpFacts) -> Finding | None:
     model = _model(f)
-    if model is None or model.loose_edges < LOOSE_EDGES_WARN:
+    if model is None or model.loose_edges_actionable < LOOSE_EDGES_WARN:
         return None
+
+    count = f"{model.loose_edges_actionable:,}".replace(",", " ")
+    in_root = f"{model.loose_edges:,}".replace(",", " ")
+    protected = (
+        f"\n\nЕщё {model.loose_edges_total - model.loose_edges_actionable:,} "
+        f"таких рёбер лежат в {model.linework_containers} компонентах, где нет "
+        f"ни одной грани. Это обычно осмысленное содержимое — 2D-подложка, план, "
+        f"разметка, — и трогать их исправление не будет."
+    ).replace(",", " ") if model.linework_containers else ""
 
     return Finding(
         id="geometry.loose_edges",
         severity="medium",
         category="геометрия",
-        title=f"{model.loose_edges:,} висячих рёбер в корне модели".replace(",", " "),
+        title=f"{count} висячих рёбер по всей модели",
         summary=(
-            "Рёбра, не принадлежащие ни одной грани и не убранные в группу. Чаще "
-            "всего это следы построения и остатки импорта DWG: на вид ничего, "
-            "а при выделении рамкой цепляется всё подряд."
+            f"Рёбра, не принадлежащие ни одной грани. Чаще всего это следы "
+            f"построения и остатки импорта DWG: на вид ничего, а при выделении "
+            f"рамкой цепляется всё подряд.\n\n"
+            f"В корне модели их {in_root}, остальные — внутри компонентов."
+            + protected
         ),
         layer="model",
-        count=model.loose_edges,
-        fix_kind="manual",
+        count=model.loose_edges_actionable,
+        fix="erase_loose_edges",
+        fix_kind="auto",
+        fix_label="Убрать висячие рёбра",
+    )
+
+
+@rule
+def r_fix_errors_offer(f: SkpFacts) -> Finding | None:
+    """Профилактическая починка — предлагается всегда, когда есть SDK.
+
+    Обнаружить внутренние ошибки заранее нечем: SDK умеет только чинить,
+    отдельной проверки в API нет. Поэтому это не находка, а предложение
+    прогнать штатный ремонт — как «Fix Problems» в самом SketchUp.
+    """
+    if f.model is None:
+        return None
+    return Finding(
+        id="model.fix_errors",
+        severity="info",
+        category="геометрия",
+        title="Профилактическая починка модели",
+        summary=(
+            "Штатная проверка и ремонт внутренних ошибок — то же, что "
+            "«Fix Problems» в SketchUp.\n\n"
+            "Заранее сказать, есть ли что чинить, нельзя: в SDK нет отдельной "
+            "проверки, только починка. Прогон безопасен и на здоровой модели "
+            "не меняет ничего — в отчёте будет видно, изменилось ли что-нибудь."
+        ),
+        layer="model",
+        fix="fix_errors",
+        fix_kind="auto",
+        fix_label="Прогнать починку",
     )
 
 

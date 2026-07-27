@@ -317,17 +317,33 @@ el.whip.addEventListener("click", async () => {
   poll(data.job_id, (job) => onFixDone(job, data.job_id));
 });
 
-function purgeBlock(p) {
-  if (!p) return "";
-  return `
-    <div class="res-grid">
-      <div class="stat"><b>${p.removed_definitions}</b><span>определений выброшено</span></div>
-      <div class="stat"><b>${p.definitions_before} → ${p.definitions_after}</b><span>стало определений</span></div>
-      <div class="stat"><b>${p.removed_layers}</b><span>пустых тегов убрано</span></div>
-      <div class="stat"><b>${p.passes}</b><span>проходов чистки</span></div>
-    </div>
-    ${p.errors && p.errors.length
-      ? `<p class="warn">при чистке: ${p.errors.map(esc).join("; ")}</p>` : ""}`;
+function repairBlock(r) {
+  if (!r) return "";
+  const cells = [];
+  if (r.operations.includes("fix_errors")) {
+    cells.push(`<div class="stat"><b>${r.fix_errors_ran ? "✔" : "—"}</b><span>починка прогнана</span></div>`);
+  }
+  if (r.operations.includes("erase_loose_edges")) {
+    cells.push(`<div class="stat"><b>${r.erased_edges}</b><span>висячих рёбер убрано</span></div>`);
+  }
+  if (r.operations.includes("normalize_textures")) {
+    cells.push(`<div class="stat"><b>${r.textures_resized} / ${r.textures_seen}</b><span>текстур приведено</span></div>`);
+    if (r.textures_failed) {
+      cells.push(`<div class="stat"><b>${r.textures_failed}</b><span>текстур не поддались</span></div>`);
+    }
+  }
+  if (r.operations.includes("purge_unused")) {
+    cells.push(`<div class="stat"><b>${r.removed_definitions}</b><span>определений выброшено</span></div>`);
+    cells.push(`<div class="stat"><b>${r.definitions_before} → ${r.definitions_after}</b><span>стало определений</span></div>`);
+  }
+
+  const scaleWarn = r.texture_scale_kept === false
+    ? `<p class="warn">⚠️ у части текстур не сошлась привязка к размерам в модели — проверьте масштаб.</p>`
+    : "";
+
+  return `<div class="res-grid">${cells.join("")}</div>${scaleWarn}
+    ${r.errors && r.errors.length
+      ? `<p class="warn">${r.errors.map(esc).join("<br>")}</p>` : ""}`;
 }
 
 function onFixDone(job, fixJobId) {
@@ -341,7 +357,7 @@ function onFixDone(job, fixJobId) {
       <div class="stat"><b>${bytes(r.size_after)}</b><span>стало</span></div>
       <div class="stat"><b>${bytes(r.saved)}</b><span>снято (${savedPct.toFixed(1)}%)</span></div>
     </div>
-    ${purgeBlock(r.purge)}
+    ${repairBlock(r.repair)}
     <p class="${r.verified ? "verify-ok" : "verify-bad"}">
       ${r.verified ? "✔" : "✘"} контейнер: ${esc(r.verify_message)}
     </p>

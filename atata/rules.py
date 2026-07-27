@@ -355,12 +355,13 @@ def r_texture_oversized(f: SkpFacts) -> Finding | None:
         items=items,
         count=len(big),
         bytes_impact=saveable,
-        fix_kind="sdk",
-        fix_label=f"Ужать до {MAX_TEXTURE_DIM}px",
+        # Чинится только когда доступен SDK: правка внутри контейнера ломает файл.
+        fix="normalize_textures" if f.model is not None else None,
+        fix_kind="auto" if f.model is not None else "sdk",
+        fix_label=f"Привести к степени двойки (до {MAX_TEXTURE_DIM}px)",
         fix_note=(
-            "Автозамена временно снята: подменять картинки прямо в контейнере "
-            "нельзя — SketchUp перестаёт открывать такой файл. Переделывается "
-            "через SDK."
+            "Главное здесь не вес на диске, а видеопамять: несжатая текстура "
+            "4000×2250 занимает в ней как 4096×4096."
         ),
     )
 
@@ -480,10 +481,12 @@ def r_texture_npot(f: SkpFacts) -> Finding | None:
             for t in sorted(npot, key=lambda t: -t.bytes)
         ],
         count=len(npot),
-        fix_kind="sdk",
+        fix="normalize_textures" if f.model is not None else None,
+        fix_kind="auto" if f.model is not None else "sdk",
+        fix_label="Привести к степени двойки",
         fix_note=(
-            "Автозамена временно снята вместе с остальными правками текстур — "
-            "см. выше."
+            "Чинится тем же исправлением, что и переразмеренные текстуры — "
+            "достаточно отметить любое из двух."
         ),
     )
 

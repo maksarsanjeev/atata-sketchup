@@ -3,7 +3,8 @@
 Запускается как подпроцесс и отдаёт результат JSON-ом::
 
     python -m atata.sdk.worker inspect model.skp result.json
-    python -m atata.sdk.worker purge   model.skp clean.skp result.json
+    python -m atata.sdk.worker check   model.skp result.json
+    python -m atata.sdk.worker repair  model.skp clean.skp fix_errors,purge_unused result.json
 
 Без имени файла результат уходит в stdout — годится для отладки руками,
 но не для разбора вызывающей стороной (см. :func:`_emit`).
@@ -65,8 +66,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     command = argv[0]
-    if command == "purge":
-        return _purge(argv[1:])
+    if command == "repair":
+        return _repair(argv[1:])
     if command == "inspect":
         return _inspect(argv[1:])
     if command == "check":
@@ -75,19 +76,24 @@ def main(argv: list[str] | None = None) -> int:
     return 2
 
 
-def _purge(argv: list[str]) -> int:
-    if len(argv) < 2:
-        _emit({"ok": False, "error": "нужны пути: исходный .skp и выходной .skp"}, None)
+def _repair(argv: list[str]) -> int:
+    """``repair SRC DEST op1,op2 OUT.json``"""
+    if len(argv) < 3:
+        _emit(
+            {"ok": False, "error": "нужны: исходный .skp, выходной .skp, список операций"},
+            None,
+        )
         return 2
 
-    from .repair import purge_model
+    from .repair import repair_model
 
     src = to_native_path(argv[0])
     dest = to_native_path(argv[1])
-    out_path = to_native_path(argv[2]) if len(argv) > 2 else None
+    operations = [op for op in argv[2].split(",") if op]
+    out_path = to_native_path(argv[3]) if len(argv) > 3 else None
 
     try:
-        report = purge_model(src, dest)
+        report = repair_model(src, dest, operations)
     except SdkUnavailable as exc:
         _emit({"ok": False, "error": str(exc), "kind": "unavailable"}, out_path)
         return 3
@@ -101,7 +107,7 @@ def _purge(argv: list[str]) -> int:
         )
         return 5
 
-    _emit({"ok": True, "purge": report.as_dict()}, out_path)
+    _emit({"ok": True, "repair": report.as_dict()}, out_path)
     return 0
 
 

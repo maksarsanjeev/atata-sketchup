@@ -109,8 +109,40 @@ def test_nesting_flagged(simple_skp: Path):
 
 
 def test_loose_edges_flagged(simple_skp: Path):
-    found = analyse_with_model(simple_skp, fake_model(loose_edges=4200))
-    assert "4 200" in found["geometry.loose_edges"].title
+    """Правило обязано называть то число, которое исправление и уберёт."""
+    found = analyse_with_model(
+        simple_skp,
+        fake_model(loose_edges=3457, loose_edges_total=500_000, loose_edges_actionable=450_429),
+    )
+    finding = found["geometry.loose_edges"]
+    assert "450 429" in finding.title
+    assert finding.count == 450_429
+    assert "3 457" in finding.summary, "в корне — отдельным числом"
+
+
+def test_linework_containers_are_called_out(simple_skp: Path):
+    """Компоненты из одних линий защищены, и об этом надо сказать."""
+    found = analyse_with_model(
+        simple_skp,
+        fake_model(
+            loose_edges=100,
+            loose_edges_total=500_000,
+            loose_edges_actionable=450_000,
+            linework_containers=12,
+        ),
+    )
+    summary = found["geometry.loose_edges"].summary
+    assert "50 000" in summary
+    assert "12" in summary
+
+
+def test_loose_edges_not_flagged_when_only_linework(simple_skp: Path):
+    """Если убирать нечего, находки быть не должно, сколько бы линий ни лежало."""
+    found = analyse_with_model(
+        simple_skp,
+        fake_model(loose_edges_total=500_000, loose_edges_actionable=0, linework_containers=30),
+    )
+    assert "geometry.loose_edges" not in found
 
 
 def test_truncated_walk_reported(simple_skp: Path):
@@ -144,7 +176,7 @@ def test_public_api_is_importable():
     """
     import atata.sdk as sdk
 
-    for name in ("can_open", "purge_geometry", "analyze_geometry", "detect"):
+    for name in ("can_open", "repair_geometry", "analyze_geometry", "detect"):
         assert hasattr(sdk, name), f"{name} не экспортирован из atata.sdk"
         assert name in sdk.__all__
 
@@ -226,14 +258,18 @@ def test_worker_rejects_unknown_command():
     assert main(["polish"]) == 2
 
 
-def test_purge_report_shape():
-    """Отчёт о чистке должен доезжать до фронта целиком."""
-    from atata.sdk.repair import PurgeReport
+def test_repair_report_shape():
+    """Отчёт о правках должен доезжать до фронта целиком."""
+    from atata.sdk.repair import RepairReport
 
-    report = PurgeReport(
+    report = RepairReport(
+        operations=["fix_errors", "purge_unused"],
         definitions_before=3820,
         definitions_after=1573,
         removed_definitions=2247,
+        erased_edges=3457,
+        textures_seen=345,
+        textures_resized=280,
         passes=10,
         size_before=365_581_605,
         size_after=255_800_000,
@@ -243,6 +279,13 @@ def test_purge_report_shape():
     data = report.as_dict()
     assert data["saved"] == report.size_before - report.size_after
     for key in (
+        "operations",
+        "fix_errors_ran",
+        "erased_edges",
+        "textures_seen",
+        "textures_resized",
+        "textures_failed",
+        "texture_scale_kept",
         "removed_definitions",
         "definitions_before",
         "definitions_after",
@@ -252,6 +295,29 @@ def test_purge_report_shape():
         "errors",
     ):
         assert key in data
+
+
+def test_operation_order_is_fixed():
+    """Порядок операций осмыслен: чинить -> мусор -> текстуры -> purge."""
+    from atata.sdk.repair import OPERATION_ORDER
+    from atata.fixes import AVAILABLE_FIXES
+
+    assert OPERATION_ORDER.index("fix_errors") < OPERATION_ORDER.index("purge_unused")
+    assert OPERATION_ORDER.index("erase_loose_edges") < OPERATION_ORDER.index("purge_unused")
+    # Каждая доступная правка должна быть известна конвейеру, иначе она
+    # молча ничего не сделает.
+    assert set(AVAILABLE_FIXES) == set(OPERATION_ORDER)
+
+
+def test_next_power_of_two():
+    from atata.sdk.repair import _next_pot
+
+    assert _next_pot(4000, 2048) == 2048
+    assert _next_pot(2250, 2048) == 2048
+    assert _next_pot(1024, 2048) == 1024
+    assert _next_pot(1000, 2048) == 512
+    assert _next_pot(3, 2048) == 2
+    assert _next_pot(0, 2048) == 1
 
 
 # ---------------------------------------------------------------- имена

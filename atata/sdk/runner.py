@@ -173,26 +173,31 @@ def can_open(
     return bool(payload.get("openable")), None
 
 
-def purge_geometry(
+def repair_geometry(
     src: str | Path,
     dest: str | Path,
+    operations: list[str],
     timeout: int = DEFAULT_TIMEOUT,
     progress: Callable[[str, float], None] | None = None,
 ) -> tuple[dict | None, str | None]:
-    """Вычистить неиспользуемое и пересохранить модель средствами SDK."""
+    """Применить операции SDK и пересохранить модель.
+
+    Все операции идут за один сеанс: модель открывается и сохраняется по
+    разу, сколько бы правок ни выбрали.
+    """
     config = detect()
     if not config.enabled:
         return None, config.reason
 
     if progress:
-        progress("чищу модель через SDK", 0.0)
+        progress("правлю модель через SDK", 0.0)
 
     payload, error = _run_worker(
-        ["purge", str(src), str(dest)], config, timeout
+        ["repair", str(src), str(dest), ",".join(operations)], config, timeout
     )
     if error:
         return None, error
-    return payload.get("purge"), None
+    return payload.get("repair"), None
 
 
 def from_payload(data: dict, path: str) -> ModelFacts:

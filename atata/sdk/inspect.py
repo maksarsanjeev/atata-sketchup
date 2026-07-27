@@ -59,7 +59,10 @@ class ModelFacts:
     # сорок раз — именно столько геометрии видит вьюпорт.
     total_faces: int = 0
     total_edges: int = 0
-    loose_edges: int = 0
+    loose_edges: int = 0          # в корне модели
+    loose_edges_total: int = 0    # по всей модели, включая компоненты
+    loose_edges_actionable: int = 0  # из них в контейнерах, где есть грани
+    linework_containers: int = 0  # контейнеры из одних линий — их не трогаем
     definitions: list[DefinitionInfo] = field(default_factory=list)
     materials: list[str] = field(default_factory=list)
     layers: list[str] = field(default_factory=list)
@@ -82,6 +85,9 @@ class ModelFacts:
             "total_faces": self.total_faces,
             "total_edges": self.total_edges,
             "loose_edges": self.loose_edges,
+            "loose_edges_total": self.loose_edges_total,
+            "loose_edges_actionable": self.loose_edges_actionable,
+            "linework_containers": self.linework_containers,
             "definitions": len(self.definitions),
             "unused_definitions": len(self.unused_definitions),
             "materials": len(self.materials),
@@ -193,6 +199,9 @@ def inspect_model(
 
         facts.max_depth = state["max_depth"]
         facts.truncated = state["truncated"]
+        facts.loose_edges_total = state.get("loose_total", 0)
+        facts.loose_edges_actionable = state.get("loose_actionable", 0)
+        facts.linework_containers = state.get("linework", 0)
 
         if progress:
             progress("готово", 1.0)
@@ -213,6 +222,18 @@ def _walk(lib, entities, memo, path_guard, depth, state) -> tuple[int, int]:
 
     faces = get_count(lib, "SUEntitiesGetNumFaces", entities)
     edges = get_count(lib, "SUEntitiesGetNumEdges", entities, False)
+
+    # Висячие рёбра считаем по всей модели, а не только в корне — иначе
+    # отчёт обещает одно число, а исправление трогает совсем другое.
+    # Контейнеры без единой грани держим отдельно: компонент из одних линий
+    # (2D-подложка, план, разметка) — это содержимое, а не мусор.
+    loose = get_count(lib, "SUEntitiesGetNumEdges", entities, True)
+    state["loose_total"] = state.get("loose_total", 0) + loose
+    if loose:
+        if faces:
+            state["loose_actionable"] = state.get("loose_actionable", 0) + loose
+        else:
+            state["linework"] = state.get("linework", 0) + 1
 
     # Группы — это тоже определения, но вставленные ровно один раз,
     # поэтому раскрываем их на месте и не мемоизируем.

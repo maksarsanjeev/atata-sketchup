@@ -35,13 +35,38 @@ class FixSpec:
 
 
 AVAILABLE_FIXES: dict[str, FixSpec] = {
+    "fix_errors": FixSpec(
+        id="fix_errors",
+        label="Починить ошибки модели",
+        description=(
+            "Штатная проверка и ремонт внутренних ошибок — то же, что "
+            "«Fix Problems» в самом SketchUp."
+        ),
+    ),
+    "erase_loose_edges": FixSpec(
+        id="erase_loose_edges",
+        label="Убрать висячие рёбра",
+        description=(
+            "Удаляет рёбра, не принадлежащие ни одной грани: следы построения "
+            "и остатки импорта."
+        ),
+    ),
+    "normalize_textures": FixSpec(
+        id="normalize_textures",
+        label="Текстуры — к степени двойки",
+        description=(
+            "Видеокарта дополняет текстуру до ближайшей степени двойки, поэтому "
+            "4000×2250 занимает в видеопамяти как 4096×4096. Приведение к точным "
+            "степеням двойки снимает этот перерасход. Привязка текстуры к "
+            "размерам в модели сохраняется."
+        ),
+    ),
     "purge_unused": FixSpec(
         id="purge_unused",
         label="Вычистить неиспользуемое",
         description=(
             "Удаляет определения компонентов, не вставленные в модель. То же, "
-            "что штатный Purge Unused. Модель пересохраняется родным "
-            "сериализатором SketchUp."
+            "что штатный Purge Unused. Они занимают память при каждом открытии."
         ),
     ),
 }
@@ -58,7 +83,7 @@ class FixReport:
     openable: bool | None = None
     open_message: str = ""
     errors: list[str] = field(default_factory=list)
-    purge: dict | None = None
+    repair: dict | None = None
 
     @property
     def saved(self) -> int:
@@ -82,7 +107,7 @@ class FixReport:
             "usable": self.usable,
             "errors": self.errors[:20],
             "filename": self.dest.name,
-            "purge": self.purge,
+            "repair": self.repair,
         }
 
 
@@ -101,14 +126,13 @@ def apply_fixes(
         report.errors.append("не выбрано ни одного применимого исправления")
         return report
 
-    from .sdk import can_open, purge_geometry
+    from .sdk import can_open, repair_geometry
 
-    if "purge_unused" in fix_ids:
-        purge_report, error = purge_geometry(src, dest, progress=progress)
-        if error:
-            report.errors.append(f"чистка не выполнена: {error}")
-            return report
-        report.purge = purge_report
+    repair_report, error = repair_geometry(src, dest, fix_ids, progress=progress)
+    if error:
+        report.errors.append(f"правка не выполнена: {error}")
+        return report
+    report.repair = repair_report
 
     if not dest.exists():
         report.errors.append("на выходе не оказалось файла")

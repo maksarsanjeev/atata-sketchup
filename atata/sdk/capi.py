@@ -86,6 +86,9 @@ SUStylesRef = _ref_type("SUStylesRef")
 SUSceneRef = _ref_type("SUSceneRef")
 SUEntityRef = _ref_type("SUEntityRef")
 SUDrawingElementRef = _ref_type("SUDrawingElementRef")
+SUEdgeRef = _ref_type("SUEdgeRef")
+SUTextureRef = _ref_type("SUTextureRef")
+SUImageRepRef = _ref_type("SUImageRepRef")
 
 # Эти три функции объявлены в заголовках как void, а не SU_RESULT.
 # Проверять у них код возврата нельзя: в регистре будет мусор, и любая
@@ -262,6 +265,46 @@ _SIGNATURES: list[tuple[str, list]] = [
         "SUSceneSetDrawingElementHidden",
         [SUSceneRef, SUDrawingElementRef, c_bool],
     ),
+    # Штатная починка модели — то же, что «Fix Problems» в самом SketchUp.
+    ("SUModelFixErrors", [SUModelRef]),
+    # Висячие рёбра.
+    ("SUEntitiesErase", [SUEntitiesRef, c_size_t, POINTER(SUEntityRef)]),
+    (
+        "SUEntitiesGetEdges",
+        [SUEntitiesRef, c_bool, c_size_t, POINTER(SUEdgeRef), POINTER(c_size_t)],
+    ),
+    ("SUEdgeGetNumFaces", [SUEdgeRef, POINTER(c_size_t)]),
+    # Текстуры. Пересоздавать их надо через файл: CreateFromImageRep не
+    # принимает масштаб, и привязка текстуры к размерам в модели теряется.
+    ("SUMaterialGetTexture", [SUMaterialRef, POINTER(SUTextureRef)]),
+    ("SUMaterialSetTexture", [SUMaterialRef, SUTextureRef]),
+    (
+        "SUTextureGetDimensions",
+        [
+            SUTextureRef,
+            POINTER(c_size_t),
+            POINTER(c_size_t),
+            POINTER(ctypes.c_double),
+            POINTER(ctypes.c_double),
+        ],
+    ),
+    ("SUTextureGetImageRep", [SUTextureRef, POINTER(SUImageRepRef)]),
+    ("SUTextureGetFileName", [SUTextureRef, POINTER(SUStringRef)]),
+    ("SUTextureSetFileName", [SUTextureRef, c_char_p]),
+    ("SUTextureGetUseAlphaChannel", [SUTextureRef, POINTER(c_bool)]),
+    (
+        "SUTextureCreateFromFile",
+        [POINTER(SUTextureRef), c_char_p, ctypes.c_double, ctypes.c_double],
+    ),
+    ("SUTextureRelease", [POINTER(SUTextureRef)]),
+    ("SUImageRepCreate", [POINTER(SUImageRepRef)]),
+    ("SUImageRepRelease", [POINTER(SUImageRepRef)]),
+    ("SUImageRepResize", [SUImageRepRef, c_size_t, c_size_t]),
+    (
+        "SUImageRepGetPixelDimensions",
+        [SUImageRepRef, POINTER(c_size_t), POINTER(c_size_t)],
+    ),
+    ("SUImageRepSaveToFile", [SUImageRepRef, c_char_p]),
     # сущности
     ("SUEntitiesGetNumFaces", [SUEntitiesRef, POINTER(c_size_t)]),
     ("SUEntitiesGetNumEdges", [SUEntitiesRef, c_bool, POINTER(c_size_t)]),
@@ -339,13 +382,17 @@ def read_string(lib: ctypes.CDLL, getter: str, ref) -> str:
             pass
 
 
-def get_array(lib: ctypes.CDLL, getter: str, ref, count: int, item_type):
-    """Обёртка над парой ``SU*GetNum*`` / ``SU*Get*``."""
+def get_array(lib: ctypes.CDLL, getter: str, ref, count: int, item_type, *extra):
+    """Обёртка над парой ``SU*GetNum*`` / ``SU*Get*``.
+
+    ``extra`` подставляется между объектом и длиной — так устроен, например,
+    ``SUEntitiesGetEdges(entities, standalone_only, len, ...)``.
+    """
     if count == 0:
         return []
     buf = (item_type * count)()
     written = c_size_t()
-    call(lib, getter, ref, count, buf, byref(written))
+    call(lib, getter, ref, *extra, count, buf, byref(written))
     return list(buf[: written.value])
 
 
