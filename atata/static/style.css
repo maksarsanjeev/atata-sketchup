@@ -57,7 +57,13 @@ body {
 }
 .logo {
   width: 132px; height: 132px; flex: none;
-  filter: drop-shadow(0 8px 0 rgba(192,0,106,.25));
+  /* Логотип растровый и непрозрачный, поэтому скругление и рамка — на самой
+     картинке, а не на её силуэте: drop-shadow по прямоугольнику выглядел бы
+     как тень от коробки. */
+  border-radius: 26px;
+  border: 5px solid #fff;
+  object-fit: cover;
+  box-shadow: 0 8px 0 rgba(192, 0, 106, .25), 0 14px 28px rgba(140, 0, 68, .3);
   animation: wobble 3s ease-in-out infinite;
 }
 @keyframes wobble { 0%,100% { transform: rotate(-4deg); } 50% { transform: rotate(4deg) scale(1.03); } }

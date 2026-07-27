@@ -153,6 +153,9 @@ def r_source_path(f: SkpFacts) -> Finding | None:
 
 @rule
 def r_model_dat_weight(f: SkpFacts) -> Finding | None:
+    # Когда SDK доступен, вес заменяется настоящим разбором — см. rules_model.
+    if f.model is not None:
+        return None
     if f.model_dat_size < MODEL_DAT_WARN:
         return None
     mb = f.model_dat_size / 1024 / 1024
@@ -574,3 +577,9 @@ def _estimate_downscale_saving(t: TextureInfo) -> int:
         return 0
     scale = MAX_TEXTURE_DIM / longest
     return max(0, int(t.bytes * (1 - scale * scale)))
+
+
+# Импорт в конце файла: rules_model регистрирует свои правила в RULES через
+# декоратор @rule и для этого сам импортирует из этого модуля. К моменту
+# импорта reestr и декоратор уже определены, цикла не возникает.
+from . import rules_model  # noqa: E402,F401  (side-effect import)

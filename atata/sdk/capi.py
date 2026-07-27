@@ -1,0 +1,312 @@
+"""ctypes-обвязка над SketchUp C API.
+
+C API — плоский C-интерфейс: все типы это структуры с единственным
+указателем, все функции возвращают код ``SUResult``. Компилировать ничего
+не нужно, хватает ctypes.
+
+Платформы: SDK существует под **Windows x64** (``SketchUpAPI.dll``) и
+**macOS** (``SketchUpAPI.framework``). Под Linux сборки нет — на Linux
+загрузка честно падает с :class:`SdkUnavailable`.
+
+Сигнатуры объявлены по публичной документации C API. Каждая функция
+объявляется лениво: если в конкретной версии SDK её нет, ошибка вылезет
+на вызове с внятным именем, а не при импорте модуля.
+"""
+
+from __future__ import annotations
+
+import ctypes
+import os
+import platform
+import sys
+from ctypes import POINTER, byref, c_bool, c_char_p, c_size_t, c_void_p
+from dataclasses import dataclass
+from pathlib import Path
+
+SU_ERROR_NONE = 0
+
+# Расшифровки кодов возврата, которые реально встречаются при чтении файла.
+SU_RESULTS = {
+    0: "SU_ERROR_NONE",
+    1: "SU_ERROR_NULL_POINTER_INPUT",
+    2: "SU_ERROR_INVALID_INPUT",
+    3: "SU_ERROR_NULL_POINTER_OUTPUT",
+    4: "SU_ERROR_INVALID_OUTPUT",
+    5: "SU_ERROR_OVERWRITE_VALID",
+    6: "SU_ERROR_GENERIC",
+    7: "SU_ERROR_SERIALIZATION",
+    8: "SU_ERROR_OUT_OF_RANGE",
+    9: "SU_ERROR_NO_DATA",
+    10: "SU_ERROR_INSUFFICIENT_SIZE",
+    11: "SU_ERROR_UNKNOWN_EXCEPTION",
+    12: "SU_ERROR_MODEL_INVALID",
+    13: "SU_ERROR_MODEL_VERSION",
+    14: "SU_ERROR_LAYER_LOCKED",
+    15: "SU_ERROR_DUPLICATE",
+    16: "SU_ERROR_PARTIAL_SUCCESS",
+    17: "SU_ERROR_UNSUPPORTED",
+    18: "SU_ERROR_INVALID_ARGUMENT",
+    19: "SU_ERROR_ENTITY_LOCKED",
+    20: "SU_ERROR_INVALID_OPERATION",
+}
+
+
+class SdkError(RuntimeError):
+    """SDK вернул код ошибки."""
+
+
+class SdkUnavailable(RuntimeError):
+    """Библиотека SDK не найдена или не поддерживается на этой платформе."""
+
+
+# --------------------------------------------------------------------------
+# Типы C API: каждый — структура с одним указателем
+# --------------------------------------------------------------------------
+
+
+def _ref_type(name: str):
+    return type(name, (ctypes.Structure,), {"_fields_": [("ptr", c_void_p)]})
+
+
+SUModelRef = _ref_type("SUModelRef")
+SUEntitiesRef = _ref_type("SUEntitiesRef")
+SUComponentDefinitionRef = _ref_type("SUComponentDefinitionRef")
+SUComponentInstanceRef = _ref_type("SUComponentInstanceRef")
+SUGroupRef = _ref_type("SUGroupRef")
+SUMaterialRef = _ref_type("SUMaterialRef")
+SULayerRef = _ref_type("SULayerRef")
+SUStringRef = _ref_type("SUStringRef")
+
+
+@dataclass
+class SdkStatus:
+    available: bool
+    library: str | None = None
+    version: str | None = None
+    reason: str | None = None
+
+    def as_dict(self) -> dict:
+        return {
+            "available": self.available,
+            "library": self.library,
+            "version": self.version,
+            "reason": self.reason,
+        }
+
+
+# --------------------------------------------------------------------------
+# Поиск библиотеки
+# --------------------------------------------------------------------------
+
+
+def _candidates() -> list[Path]:
+    """Где искать библиотеку SDK, в порядке приоритета."""
+    found: list[Path] = []
+
+    env = os.environ.get("ATATA_SDK_PATH")
+    system = platform.system()
+
+    if system == "Windows":
+        leaf = Path("binaries/sketchup/x64/SketchUpAPI.dll")
+        names = ["SketchUpAPI.dll"]
+    elif system == "Darwin":
+        leaf = Path("binaries/sketchup/x64/SketchUpAPI.framework/SketchUpAPI")
+        names = ["SketchUpAPI.framework/SketchUpAPI", "libSketchUpAPI.dylib"]
+    else:
+        return []
+
+    if env:
+        root = Path(env)
+        # Можно указать как каталог распакованного SDK, так и файл напрямую.
+        if root.is_file():
+            found.append(root)
+        else:
+            found.append(root / leaf)
+            found.extend(root / name for name in names)
+
+    for root in (Path.cwd() / "sdk", Path(sys.prefix) / "sdk"):
+        found.append(root / leaf)
+
+    return [p for p in found if p.exists()]
+
+
+_loaded: ctypes.CDLL | None = None
+_status: SdkStatus | None = None
+
+
+def load_sdk() -> ctypes.CDLL:
+    """Загрузить библиотеку SDK. Кэшируется на процесс."""
+    global _loaded, _status
+
+    if _loaded is not None:
+        return _loaded
+
+    system = platform.system()
+    if system not in ("Windows", "Darwin"):
+        _status = SdkStatus(
+            available=False,
+            reason=(
+                f"SketchUp SDK не существует под {system}: Trimble выпускает его "
+                f"только под Windows x64 и macOS. Разбор геометрии нужно выносить "
+                f"в воркер на поддерживаемой платформе."
+            ),
+        )
+        raise SdkUnavailable(_status.reason)
+
+    paths = _candidates()
+    if not paths:
+        _status = SdkStatus(
+            available=False,
+            reason=(
+                "библиотека SDK не найдена. Скачайте SketchUp SDK с "
+                "developer.sketchup.com (приняв Trimble Developer Terms), "
+                "распакуйте и укажите путь в ATATA_SDK_PATH."
+            ),
+        )
+        raise SdkUnavailable(_status.reason)
+
+    path = paths[0]
+    try:
+        if system == "Windows":
+            # Соседние DLL (SketchUpCommonPreferences.dll) грузятся по путям
+            # поиска, поэтому каталог надо добавить явно.
+            os.add_dll_directory(str(path.parent))
+            lib = ctypes.WinDLL(str(path))
+        else:
+            lib = ctypes.CDLL(str(path))
+    except OSError as exc:
+        _status = SdkStatus(available=False, reason=f"не загрузилась {path}: {exc}")
+        raise SdkUnavailable(_status.reason) from exc
+
+    _declare(lib)
+    _loaded = lib
+    _status = SdkStatus(available=True, library=str(path), version=_read_version(lib))
+    return lib
+
+
+def sdk_status() -> SdkStatus:
+    """Состояние SDK без выброса исключения — для /health и интерфейса."""
+    if _status is not None:
+        return _status
+    try:
+        load_sdk()
+    except (SdkUnavailable, SdkError) as exc:
+        if _status is None:
+            return SdkStatus(available=False, reason=str(exc))
+    return _status or SdkStatus(available=False, reason="неизвестно")
+
+
+def _read_version(lib: ctypes.CDLL) -> str | None:
+    major, minor = ctypes.c_size_t(), ctypes.c_size_t()
+    try:
+        lib.SUGetAPIVersion(byref(major), byref(minor))
+    except Exception:
+        return None
+    return f"{major.value}.{minor.value}"
+
+
+# --------------------------------------------------------------------------
+# Объявления сигнатур
+# --------------------------------------------------------------------------
+
+# (имя, [типы аргументов]) — возвращают все SUResult (c_int), кроме отмеченных.
+_SIGNATURES: list[tuple[str, list]] = [
+    ("SUInitialize", []),
+    ("SUTerminate", []),
+    ("SUGetAPIVersion", [POINTER(c_size_t), POINTER(c_size_t)]),
+    # модель
+    ("SUModelCreateFromFile", [POINTER(SUModelRef), c_char_p]),
+    ("SUModelRelease", [POINTER(SUModelRef)]),
+    ("SUModelGetEntities", [SUModelRef, POINTER(SUEntitiesRef)]),
+    ("SUModelGetNumMaterials", [SUModelRef, POINTER(c_size_t)]),
+    ("SUModelGetMaterials", [SUModelRef, c_size_t, POINTER(SUMaterialRef), POINTER(c_size_t)]),
+    ("SUModelGetNumComponentDefinitions", [SUModelRef, POINTER(c_size_t)]),
+    ("SUModelGetComponentDefinitions", [SUModelRef, c_size_t, POINTER(SUComponentDefinitionRef), POINTER(c_size_t)]),
+    ("SUModelGetNumLayers", [SUModelRef, POINTER(c_size_t)]),
+    ("SUModelGetLayers", [SUModelRef, c_size_t, POINTER(SULayerRef), POINTER(c_size_t)]),
+    ("SUModelGetNumScenes", [SUModelRef, POINTER(c_size_t)]),
+    ("SUModelGetNumStyles", [SUModelRef, POINTER(c_size_t)]),
+    # сущности
+    ("SUEntitiesGetNumFaces", [SUEntitiesRef, POINTER(c_size_t)]),
+    ("SUEntitiesGetNumEdges", [SUEntitiesRef, c_bool, POINTER(c_size_t)]),
+    ("SUEntitiesGetNumGroups", [SUEntitiesRef, POINTER(c_size_t)]),
+    ("SUEntitiesGetGroups", [SUEntitiesRef, c_size_t, POINTER(SUGroupRef), POINTER(c_size_t)]),
+    ("SUEntitiesGetNumInstances", [SUEntitiesRef, POINTER(c_size_t)]),
+    ("SUEntitiesGetInstances", [SUEntitiesRef, c_size_t, POINTER(SUComponentInstanceRef), POINTER(c_size_t)]),
+    # группы и компоненты
+    ("SUGroupGetEntities", [SUGroupRef, POINTER(SUEntitiesRef)]),
+    ("SUComponentInstanceGetDefinition", [SUComponentInstanceRef, POINTER(SUComponentDefinitionRef)]),
+    ("SUComponentDefinitionGetEntities", [SUComponentDefinitionRef, POINTER(SUEntitiesRef)]),
+    ("SUComponentDefinitionGetName", [SUComponentDefinitionRef, POINTER(SUStringRef)]),
+    ("SUComponentDefinitionGetNumInstances", [SUComponentDefinitionRef, POINTER(c_size_t)]),
+    ("SUComponentDefinitionGetNumUsedInstances", [SUComponentDefinitionRef, POINTER(c_size_t)]),
+    # материалы и слои
+    ("SUMaterialGetName", [SUMaterialRef, POINTER(SUStringRef)]),
+    ("SULayerGetName", [SULayerRef, POINTER(SUStringRef)]),
+    # строки
+    ("SUStringCreate", [POINTER(SUStringRef)]),
+    ("SUStringRelease", [POINTER(SUStringRef)]),
+    ("SUStringGetUTF8Length", [SUStringRef, POINTER(c_size_t)]),
+    ("SUStringGetUTF8", [SUStringRef, c_size_t, c_char_p, POINTER(c_size_t)]),
+]
+
+
+def _declare(lib: ctypes.CDLL) -> None:
+    for name, argtypes in _SIGNATURES:
+        try:
+            fn = getattr(lib, name)
+        except AttributeError:
+            # Функции нет в этой версии SDK — обнаружим при вызове.
+            continue
+        fn.argtypes = argtypes
+        fn.restype = ctypes.c_int
+
+
+def check(result: int, where: str) -> None:
+    if result != SU_ERROR_NONE:
+        name = SU_RESULTS.get(result, f"код {result}")
+        raise SdkError(f"{where}: {name}")
+
+
+def call(lib: ctypes.CDLL, name: str, *args) -> None:
+    """Вызвать функцию SDK и проверить код возврата."""
+    try:
+        fn = getattr(lib, name)
+    except AttributeError as exc:
+        raise SdkError(f"{name}: нет в загруженной версии SDK") from exc
+    check(fn(*args), name)
+
+
+def read_string(lib: ctypes.CDLL, getter: str, ref) -> str:
+    """Прочитать строку через SUStringRef с обязательным освобождением."""
+    string = SUStringRef()
+    call(lib, "SUStringCreate", byref(string))
+    try:
+        call(lib, getter, ref, byref(string))
+        length = c_size_t()
+        call(lib, "SUStringGetUTF8Length", string, byref(length))
+        buf = ctypes.create_string_buffer(length.value + 1)
+        written = c_size_t()
+        call(lib, "SUStringGetUTF8", string, length.value + 1, buf, byref(written))
+        return buf.value.decode("utf-8", "replace")
+    finally:
+        try:
+            call(lib, "SUStringRelease", byref(string))
+        except SdkError:
+            pass
+
+
+def get_array(lib: ctypes.CDLL, getter: str, ref, count: int, item_type):
+    """Обёртка над парой ``SU*GetNum*`` / ``SU*Get*``."""
+    if count == 0:
+        return []
+    buf = (item_type * count)()
+    written = c_size_t()
+    call(lib, getter, ref, count, buf, byref(written))
+    return list(buf[: written.value])
+
+
+def get_count(lib: ctypes.CDLL, getter: str, ref, *extra) -> int:
+    value = c_size_t()
+    call(lib, getter, ref, *extra, byref(value))
+    return value.value

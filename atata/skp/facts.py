@@ -86,6 +86,10 @@ class SkpFacts:
     thumbnail_count: int
     style_count: int
     scene_count: int
+    # Заполняется, только если доступен SketchUp SDK: разбор model.dat.
+    # Тип — atata.sdk.inspect.ModelFacts; здесь не импортируется, чтобы
+    # контейнерный слой не зависел от SDK-слоя.
+    model: object | None = None
 
     @property
     def texture_bytes(self) -> int:

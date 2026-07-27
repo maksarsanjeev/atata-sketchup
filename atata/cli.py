@@ -12,6 +12,7 @@ from pathlib import Path
 
 from .fixes import AVAILABLE_FIXES, apply_fixes
 from .rules import analyze
+from .sdk import SdkError, SdkUnavailable, inspect_model, sdk_status
 from .skp.container import NotASkpFile
 from .skp.facts import collect_facts
 
@@ -26,7 +27,7 @@ def human(n: int) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="atata", description="порка кривых .skp")
+    parser = argparse.ArgumentParser(prog="atata", description="наказание кривых .skp")
     parser.add_argument("path", type=Path)
     parser.add_argument("--fix", action="append", default=[], choices=sorted(AVAILABLE_FIXES))
     parser.add_argument("-o", "--output", type=Path)
@@ -47,6 +48,23 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\n{exc}", file=sys.stderr)
         return 1
     print()
+
+    try:
+        facts.model = inspect_model(args.path, progress=progress)
+        print(f"\n  SDK: {sdk_status().library}")
+    except SdkUnavailable as exc:
+        print(f"  SDK: недоступен — {exc}")
+    except SdkError as exc:
+        print(f"  SDK: не смог прочитать модель — {exc}")
+
+    if facts.model is not None:
+        m = facts.model
+        print(
+            f"  граней в сцене  : {m.total_faces:,}".replace(",", " ") + "\n"
+            f"  определений     : {len(m.definitions)} "
+            f"(не используются: {len(m.unused_definitions)})\n"
+            f"  вложенность     : {m.max_depth}"
+        )
 
     print(
         f"  версия SketchUp : {facts.version}\n"

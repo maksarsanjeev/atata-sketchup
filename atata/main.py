@@ -16,6 +16,7 @@ from . import __version__
 from .fixes import AVAILABLE_FIXES, apply_fixes
 from .jobs import Job, JobStore
 from .rules import analyze
+from .sdk import SdkError, SdkUnavailable, inspect_model, sdk_status
 from .skp.container import NotASkpFile
 from .skp.facts import collect_facts
 
@@ -50,6 +51,7 @@ async def health():
         "ok": True,
         "version": __version__,
         "disk_used_mb": round(store.disk_usage() / 1024 / 1024, 1),
+        "sdk": sdk_status().as_dict(),
     }
 
 
@@ -100,6 +102,18 @@ def _analyze_task(job: Job, path: Path) -> dict:
     except NotASkpFile as exc:
         raise HTTPException(415, str(exc)) from exc
 
+    # Разбор геометрии — только там, где есть SketchUp SDK (Windows/macOS).
+    # На Linux слой отсутствует, и это не ошибка: отчёт просто остаётся
+    # на косвенных оценках контейнерного слоя.
+    sdk_note: str | None = None
+    try:
+        job.stage = "разбираю геометрию через SDK"
+        facts.model = inspect_model(path, progress=progress)
+    except SdkUnavailable as exc:
+        sdk_note = str(exc)
+    except SdkError as exc:
+        sdk_note = f"SDK не смог прочитать модель: {exc}"
+
     store.stash_facts(job.id, facts)
 
     job.stage = "применяю правила"
@@ -138,6 +152,11 @@ def _analyze_task(job: Job, path: Path) -> dict:
             "by_severity": by_severity,
             "auto_saveable_bytes": auto_saveable,
         },
+        "sdk": {
+            "used": facts.model is not None,
+            "note": sdk_note,
+            "model": facts.model.as_dict() if facts.model is not None else None,
+        },
         "fixes": {k: v.__dict__ for k, v in AVAILABLE_FIXES.items()},
     }
 
@@ -159,7 +178,7 @@ async def job_status(job_id: str):
 
 
 # --------------------------------------------------------------------------
-# Порка
+# Наказание
 # --------------------------------------------------------------------------
 
 

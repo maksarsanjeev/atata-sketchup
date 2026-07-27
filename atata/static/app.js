@@ -148,7 +148,7 @@ function renderSummary(data) {
 
   let verdict;
   if (crit >= 4) verdict = "модель заслужила по полной ⚡ серьёзных провинностей выше крыши";
-  else if (crit >= 1) verdict = "есть за что выпороть, но не всё потеряно";
+  else if (crit >= 1) verdict = "есть за что наказать, но не всё потеряно";
   else if (data.summary.total > 0) verdict = "по мелочи есть замечания, в целом терпимо ♡";
   else verdict = "чистенько! кто-то хорошо себя вёл ✿";
 
@@ -166,7 +166,22 @@ function renderSummary(data) {
       <div class="stat"><b>${bytes(f.texture_bytes)}</b><span>вес текстур</span></div>
       <div class="stat"><b>${data.summary.total}</b><span>находок</span></div>
     </div>
-    <p class="verdict">${esc(verdict)}</p>`;
+    <p class="verdict">${esc(verdict)}</p>
+    ${sdkBanner(data.sdk)}`;
+}
+
+/** Слой геометрии живёт только там, где есть SketchUp SDK (Windows/macOS). */
+function sdkBanner(sdk) {
+  if (!sdk) return "";
+  if (sdk.used) {
+    const m = sdk.model || {};
+    return `<p class="verdict">🔍 геометрия разобрана через SDK:
+      ${(m.total_faces || 0).toLocaleString("ru")} граней,
+      ${m.definitions || 0} определений (${m.unused_definitions || 0} не используются),
+      вложенность ${m.max_depth || 0}</p>`;
+  }
+  return `<p class="warn">🔧 разбор геометрии выключен — ${esc(sdk.note || "SDK недоступен")}.
+    Всё, что касается model.dat, ниже показано оценкой по косвенным признакам.</p>`;
 }
 
 function renderComposition(data) {
@@ -243,7 +258,7 @@ function updatePicked() {
   el.whip.disabled = checked.length === 0;
 }
 
-// ---------------------------------------------------------------- порка
+// ---------------------------------------------------------------- наказание
 
 el.whip.addEventListener("click", async () => {
   const fixes = [...new Set(selectedFixes())];
@@ -292,7 +307,7 @@ function onFixDone(job, fixJobId) {
       ? `<details class="f-items"><summary>ошибки на отдельных файлах (${r.errors.length})</summary>
          <ul class="f-list">${r.errors.map((e) => `<li>${esc(e)}</li>`).join("")}</ul></details>`
       : ""}
-    <a class="btn dl" href="/api/job/${fixJobId}/download">скачать выпоротый файл ⬇</a>
+    <a class="btn dl" href="/api/job/${fixJobId}/download">скачать наказанный файл ⬇</a>
     <p class="warn">
       Проверьте результат в SketchUp перед тем, как пускать файл в работу.
       Оригинал не изменялся.
